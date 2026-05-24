@@ -222,3 +222,58 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
   #produk .toolbar .btn{white-space:nowrap!important;min-height:42px!important;}
   #produk .toolbar input{width:100%!important;min-height:46px!important;}
 }
+
+
+/* ===== V5 FORCE ADMIN PRODUCT POPUP / BOTTOM SHEET TANPA :has ===== */
+@media(max-width:760px){
+  body:has(.modal.product-modal){overflow:hidden!important;}
+  .modal.product-modal{
+    position:fixed!important; inset:0!important; z-index:99999!important;
+    display:flex!important; align-items:flex-end!important; justify-content:center!important;
+    background:rgba(2,6,23,.70)!important; padding:0!important;
+  }
+  .modal.product-modal .product-sheet-card{
+    width:100vw!important; max-width:100vw!important; height:86svh!important; max-height:86svh!important;
+    border-radius:24px 24px 0 0!important; padding:0!important; margin:0!important;
+    overflow:hidden!important; background:#0b1220!important; color:#e5e7eb!important;
+    border:1px solid rgba(255,255,255,.10)!important;
+    box-shadow:0 -20px 70px rgba(0,0,0,.50)!important;
+  }
+  .modal.product-modal .modal-head{
+    height:64px!important; display:flex!important; align-items:center!important; justify-content:space-between!important;
+    position:sticky!important; top:0!important; z-index:10!important;
+    padding:12px 16px!important; margin:0!important;
+    background:#101827!important; border-bottom:1px solid rgba(255,255,255,.10)!important;
+  }
+  .modal.product-modal .modal-head b{font-size:18px!important;color:#fff!important;font-weight:950!important;}
+  .modal.product-modal .x{width:42px!important;height:42px!important;border-radius:14px!important;background:#1f2937!important;color:#fff!important;font-size:0!important;}
+  .modal.product-modal .x:after{content:'×';font-size:26px!important;line-height:1!important;color:#fff!important;}
+  .modal.product-modal .product-form{
+    height:calc(86svh - 64px)!important; max-height:calc(86svh - 64px)!important;
+    overflow-y:auto!important; overflow-x:hidden!important; -webkit-overflow-scrolling:touch!important;
+    display:grid!important; grid-template-columns:1fr 1fr!important; gap:10px!important;
+    padding:14px 14px 92px!important; background:#0b1220!important;
+  }
+  .modal.product-modal .product-form label{display:block!important;grid-column:auto!important;color:#94a3b8!important;font-size:12px!important;font-weight:900!important;margin:0!important;}
+  .modal.product-modal .product-form label small{display:none!important;}
+  .modal.product-modal .product-form label:nth-child(1),
+  .modal.product-modal .product-form label:nth-child(2),
+  .modal.product-modal .product-form label:nth-child(13),
+  .modal.product-modal .product-form label.wide{grid-column:1/-1!important;}
+  .modal.product-modal .product-form input,
+  .modal.product-modal .product-form select,
+  .modal.product-modal .product-form textarea{
+    width:100%!important; min-height:50px!important; margin-top:6px!important;
+    border-radius:14px!important; border:1px solid #263244!important;
+    background:#111827!important; color:#f8fafc!important; font-size:16px!important; padding:12px!important;
+  }
+  .modal.product-modal .product-form textarea{min-height:82px!important;}
+  .modal.product-modal .product-form input::placeholder,.modal.product-modal .product-form textarea::placeholder{color:#64748b!important;}
+  .modal.product-modal .product-form button.btn.primary.wide{
+    position:fixed!important; left:16px!important; right:16px!important; bottom:14px!important; z-index:100001!important;
+    width:auto!important; height:58px!important; border-radius:18px!important;
+    background:linear-gradient(135deg,#2563eb,#1d4ed8)!important; color:white!important;
+    font-size:17px!important; font-weight:950!important; box-shadow:0 14px 35px rgba(37,99,235,.45)!important;
+  }
+  .modal.product-modal .upload-preview{max-height:90px!important;border-radius:14px!important;margin-top:8px!important;}
+}
