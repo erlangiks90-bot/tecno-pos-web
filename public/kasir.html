@@ -30,11 +30,34 @@ function closeShiftModal(){modal(`<div class="modal-head"><b>Tutup Kas</b><butto
 function bindShortcuts(){document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!['F1','F2','F3','F4','Escape'].includes(e.key))return; if(e.key==='F1'){e.preventDefault();showSection('kasirPage');search.focus()} if(e.key==='F2'){e.preventDefault();checkout()} if(e.key==='F3'){e.preventDefault();holdCart()} if(e.key==='F4'){e.preventDefault();showSection('riwayat');loadTransactions()} if(e.key==='Escape'){if(document.querySelector('.modal'))closeModal(); else search.value='';}})}
 
 function storeBrand(){const t=API.toko||{};sideTitle.textContent=t.nama_toko||'NAMA TOKO';topStore.textContent=t.nama_toko||'';profName.textContent=API.user.nama+' - '+(t.nama_toko||'');if(t.logo){logoBox.innerHTML=`<img src="${t.logo}">`}else{logoBox.textContent=(t.nama_toko||'TK').slice(0,2).toUpperCase()}}
-async function loadProducts(showPopup=false){let q=(search.value||'').trim();let j=await api('/api/admin/products?q='+encodeURIComponent(q));PRODUCTS=j.data;renderProducts();if(q && (showPopup||window.innerWidth<=760))openSearchPopup();if(PRODUCTS.length===1 && q){addCart(PRODUCTS[0]);search.value='';closeSearchPopup();}}
-function renderProducts(){productGrid.innerHTML=`<div class="popup-head"><b>Hasil pencarian barang</b><button class="x" onclick="closeSearchPopup()">X</button></div>`+(PRODUCTS.map(p=>`<div class="prod-card"><h4>${p.nama}</h4><div class="side-sub">${p.barcode||'-'} • ${p.kategori} • Rak ${p.rak||'-'}</div><div>Stok: <b>${p.stok}</b> ${p.satuan}</div><div class="price">${rp(p.harga_jual)}</div><button class="btn primary" style="width:100%;margin-top:10px" onclick="addCart(${p.id});closeSearchPopup();search.focus()">Tambah</button></div>`).join('')||'<div class="card">Produk tidak ditemukan</div>')}
-function addCart(p){if(typeof p==='number')p=PRODUCTS.find(x=>x.id===p);if(!p)return;let row=CART.find(x=>x.id===p.id);if(row)row.qty++;else CART.push({id:p.id,nama:p.nama,harga:p.harga_jual,harga_member:p.harga_member||0,qty:1,stok:p.stok});renderCart();toast('Masuk keranjang: '+p.nama)}
+async function loadProducts(showPopup=false){
+  let q=(search.value||'').trim();
+  if(!q){PRODUCTS=[];renderProducts();closeSearchPopup();return;}
+  try{
+    let j=await api('/api/admin/products?q='+encodeURIComponent(q));
+    PRODUCTS=Array.isArray(j.data)?j.data:[];
+  }catch(e){
+    PRODUCTS=[];
+    toast('Gagal memuat barang');
+  }
+  renderProducts();
+  if(showPopup || window.innerWidth<=900) openSearchPopup();
+}
+function renderProducts(){
+  const rows=PRODUCTS.map(p=>`<div class="prod-card search-result-item" data-id="${p.id}"><h4>${p.nama}</h4><div class="side-sub">${p.barcode||'-'} • ${p.kategori||'Umum'} • Rak ${p.rak||'-'}</div><div>Stok: <b>${p.stok}</b> ${p.satuan||'PCS'}</div><div class="price">${rp(p.harga_jual)}</div><button type="button" class="btn primary add-product-btn" data-id="${p.id}" style="width:100%;margin-top:10px">Tambah</button></div>`).join('');
+  productGrid.innerHTML=`<div class="popup-head"><b>Hasil pencarian barang</b><button type="button" class="x" onclick="closeSearchPopup()">X</button></div>`+(rows||'<div class="card">Produk tidak ditemukan</div>');
+}
+function addCart(p){if(typeof p==='number')p=PRODUCTS.find(x=>Number(x.id)===Number(p));if(!p)return;let row=CART.find(x=>Number(x.id)===Number(p.id));if(row)row.qty++;else CART.push({id:p.id,nama:p.nama,harga:p.harga_jual,harga_member:p.harga_member||0,qty:1,stok:p.stok});renderCart();saveCartAuto();toast('Masuk keranjang: '+p.nama)}
 function openSearchPopup(){document.body.classList.add('search-open')}
 function closeSearchPopup(){document.body.classList.remove('search-open')}
+function addSearchResultToCart(id){addCart(Number(id));search.value='';closeSearchPopup();setTimeout(()=>search.focus(),80)}
+async function scanOrSearch(){
+  const q=(search.value||'').trim();
+  if(!q) return;
+  await loadProducts(true);
+  const exact=PRODUCTS.find(p=>String(p.barcode||'').toLowerCase()===q.toLowerCase());
+  if(exact) addSearchResultToCart(exact.id);
+}
 function priceOf(c){return Number(memberSelect.value)>0 && c.harga_member>0 ? Number(c.harga_member) : Number(c.harga)}
 function renderCart(){cartItems.innerHTML=CART.map((c,i)=>`<div class="cart-row"><div><b>${c.nama}</b><div>${rp(priceOf(c))} x ${c.qty} = <b>${rp(priceOf(c)*c.qty)}</b></div></div><div class="qty"><button onclick="chg(${i},-1)">-</button><b>${c.qty}</b><button onclick="chg(${i},1)">+</button><button onclick="rm(${i})">×</button></div></div>`).join('')||'<div class="side-sub">Keranjang kosong</div>';saveCartAuto();calc()}
 function chg(i,n){CART[i].qty+=n;if(CART[i].qty<=0)CART.splice(i,1);renderCart()}function rm(i){CART.splice(i,1);renderCart()}
@@ -54,8 +77,9 @@ async function loadAI(){let j=await api('/api/ai/insight');aiText.textContent=j.
 function askLocalAI(){let q=aiInput.value.toLowerCase();let bayar=(q.match(/\d+/)||[])[0];let tot=calc().tot;if(q.includes('kembalian')&&bayar){aiAnswer.textContent='Kembalian: '+rp(Number(bayar)-tot)}else aiAnswer.textContent='Gunakan tombol Tanya AI untuk ringkasan toko, atau ketik: hitung kembalian 100000.'}
 async function absenMasuk(){let j=await api('/api/kasir/attendance/in',{method:'POST',body:{}});absenInfo.textContent=j.message||'Absen masuk berhasil';toast(absenInfo.textContent)}
 async function absenPulang(){await api('/api/kasir/attendance/out',{method:'POST',body:{}});absenInfo.textContent='Absen pulang berhasil';toast('Absen pulang berhasil')}
-search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProducts(true)} if(e.key==='Escape'){closeSearchPopup()}});
-search.addEventListener('input',()=>{clearTimeout(window.__searchDelay);let q=search.value.trim();if(!q){closeSearchPopup();return}window.__searchDelay=setTimeout(()=>loadProducts(true),250)});
+search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();scanOrSearch()} if(e.key==='Escape'){closeSearchPopup()}});
+search.addEventListener('input',()=>{clearTimeout(window.__searchDelay);let q=search.value.trim();if(!q){PRODUCTS=[];renderProducts();closeSearchPopup();return}window.__searchDelay=setTimeout(()=>loadProducts(true),180)});
+productGrid.addEventListener('click',e=>{const btn=e.target.closest('.add-product-btn'); if(btn){e.preventDefault();addSearchResultToCart(btn.dataset.id)}});
 document.addEventListener('click',e=>{if(document.body.classList.contains('search-open')&&!e.target.closest('.pos-search-panel'))closeSearchPopup()});
 
 async function requestVoid(id){let alasan=prompt('Alasan batal/void transaksi?');if(!alasan)return;await api('/api/kasir/void-request',{method:'POST',body:{transaksi_id:id,alasan}});toast('Permintaan void dikirim ke admin')}

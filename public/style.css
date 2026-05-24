@@ -93,3 +93,11 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
   body.search-open .product-popup{display:grid!important;position:fixed;left:10px;right:10px;top:116px;bottom:12px;z-index:70;grid-template-columns:1fr;align-content:start;gap:8px;max-height:none;overflow:auto;background:var(--card)!important;border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 80px rgba(15,23,42,.28);padding:10px}.product-popup .popup-head{display:flex;position:sticky;top:-10px;z-index:2;align-items:center;justify-content:space-between;background:var(--card);padding:4px 0 8px;border-bottom:1px solid var(--line)}.product-popup .prod-card{box-shadow:none;border-radius:14px;padding:12px}.product-popup .prod-card h4{font-size:15px}.product-popup .prod-card .btn{height:42px}.search-open:before{content:"";position:fixed;inset:0;background:rgba(15,23,42,.28);z-index:60}.search-open .pos-search-panel{z-index:75}.modal{padding:10px;align-items:flex-end}.modal-card{border-radius:22px 22px 0 0;max-height:92svh}.receipt{margin:auto}.receipt-actions{grid-template-columns:1fr 1fr}.receipt-actions .btn{padding:12px 10px;font-size:13px}
 }
 @media(min-width:761px){.product-popup .popup-head{display:none}}
+
+/* PATCH AMAN V1: popup cari barang tidak menggeser keranjang */
+@media(max-width:760px){
+  .kasir-fullscreen .pos-search-panel{position:sticky!important;top:58px!important;z-index:80!important}
+  body.search-open .product-popup{display:grid!important;position:fixed!important;left:10px!important;right:10px!important;top:116px!important;bottom:10px!important;z-index:90!important;overflow:auto!important}
+  body.search-open .cart{pointer-events:none}
+  body.search-open .product-popup, body.search-open .pos-search-panel{pointer-events:auto}
+}
