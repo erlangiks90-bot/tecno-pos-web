@@ -1,7 +1,7 @@
 {
   "name": "tecno-pos-pro",
-  "version": "3.0.0",
-  "description": "TECNO POS Pro - Multi toko, developer panel, admin toko, kasir, paket berbayar, thermal print",
+  "version": "15.0.0",
+  "description": "TECNO POS V15 Pro Max - multi toko, hak akses, stok, kasir pro, laporan, WIB, mobile",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

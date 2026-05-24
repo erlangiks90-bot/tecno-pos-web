@@ -1,18 +1,25 @@
 const API={user:JSON.parse(localStorage.getItem('tecno_user')||'null'),toko:JSON.parse(localStorage.getItem('tecno_toko')||'{}')};
-if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.href='/';
+if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.replace('/');
 const rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 function parseAppDate(v){
   if(!v) return new Date();
   if(v instanceof Date) return v;
-  let s=String(v).trim();
-  if(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) s=s.replace(' ','T')+'Z';
-  return new Date(s);
+  return new Date(String(v).trim().replace(' ','T'));
 }
 function formatDateID(v){
+  if(!v) return '-';
+  const s=String(v).trim();
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(m){
+    return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}:${m[6]||'00'} WIB`;
+  }
   const d=parseAppDate(v);
   if(isNaN(d.getTime())) return String(v||'-');
-  return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(/\./g,':');
+  return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(/\./g,':')+' WIB';
 }
+function prefKey(name){return API.user?.id?`tecno_${name}_${API.user.id}`:`tecno_${name}`;}
+function getUserTheme(){return localStorage.getItem(prefKey('theme'))||localStorage.getItem('tecno_theme')||API.user?.mode_tema||API.toko?.mode_tema||'eye';}
+function getUserAccent(){return localStorage.getItem(prefKey('accent'))||localStorage.getItem('tecno_accent')||API.user?.warna_tema||API.toko?.warna_tema||'blue';}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
 async function api(url,opt={}){
   opt.headers=Object.assign({'Content-Type':'application/json','x-user-id':API.user?.id||''},opt.headers||{});
@@ -21,7 +28,7 @@ async function api(url,opt={}){
   const text=await r.text();
   let j={};
   try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
-  if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.href='/';throw new Error(j.message)}
+  if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/');throw new Error(j.message)}
   if(!r.ok||j.ok===false)throw new Error(j.message||'Error');
   return j;
 }
@@ -29,22 +36,29 @@ async function api(url,opt={}){
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
 function applyTheme(){
-  const theme=localStorage.getItem('tecno_theme')||API.toko?.mode_tema||'eye';
+  const theme=getUserTheme();
   document.documentElement.setAttribute('data-theme',theme);
   applyAccent();
 }
 function applyAccent(){
-  const accent=localStorage.getItem('tecno_accent')||API.toko?.warna_tema||'blue';
+  const accent=getUserAccent();
   document.documentElement.setAttribute('data-accent',accent);
 }
 applyTheme();
-function setTheme(theme){localStorage.setItem('tecno_theme',theme);document.documentElement.setAttribute('data-theme',theme);toast('Mode tampilan: '+theme)}
-function setAccent(accent){localStorage.setItem('tecno_accent',accent);document.documentElement.setAttribute('data-accent',accent);toast('Warna tema: '+accent)}
+function syncThemeInputs(){
+  document.querySelectorAll('[data-user-theme]').forEach(el=>el.value=getUserTheme());
+  document.querySelectorAll('[data-user-accent]').forEach(el=>el.value=getUserAccent());
+}
+function setTheme(theme){localStorage.setItem(prefKey('theme'),theme);document.documentElement.setAttribute('data-theme',theme);syncThemeInputs();toast('Mode tampilan akun ini: '+theme)}
+function setAccent(accent){localStorage.setItem(prefKey('accent'),accent);document.documentElement.setAttribute('data-accent',accent);syncThemeInputs();toast('Warna akun ini: '+accent)}
+function themePanelHTML(){return `<div class="card"><h3>Tampilan Akun Saya</h3><p class="side-sub">Warna/tema ini hanya untuk akun yang sedang login. Kasir, admin, dan developer bisa beda sendiri-sendiri.</p><form class="form"><label>Mode Tampilan<select data-user-theme onchange="setTheme(this.value)"><option value="eye">Mode Nyaman Mata</option><option value="light">Mode Terang</option><option value="dark">Mode Gelap</option></select></label><label>Warna Tema<select data-user-accent onchange="setAccent(this.value)"><option value="blue">Biru</option><option value="green">Hijau</option><option value="purple">Ungu</option><option value="orange">Orange</option><option value="black">Hitam</option></select></label></form><div class="theme-row"><button class="btn" onclick="setTheme('eye')">Nyaman</button><button class="btn" onclick="setTheme('light')">Terang</button><button class="btn" onclick="setTheme('dark')">Gelap</button></div><div class="theme-swatch"><button class="btn" onclick="setAccent('blue')">Biru</button><button class="btn" onclick="setAccent('green')">Hijau</button><button class="btn" onclick="setAccent('purple')">Ungu</button><button class="btn" onclick="setAccent('orange')">Orange</button><button class="btn" onclick="setAccent('black')">Hitam</button></div></div>`}
+function renderThemePanels(){document.querySelectorAll('[data-theme-panel]').forEach(el=>el.innerHTML=themePanelHTML());syncThemeInputs();}
+document.addEventListener('DOMContentLoaded',renderThemePanels);
 function logout(){
   const m=modal(`<div class="modal-head"><b>Keluar dari akun?</b><button class="x" onclick="closeModal()">X</button></div><p>Apakah yakin ingin keluar?</p><div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px"><button class="btn" onclick="closeModal()">BATAL</button><button class="btn danger" onclick="confirmLogout()">LOGOUT</button></div>`);
   m.addEventListener('click',e=>{if(e.target===m)closeModal()});
 }
-function confirmLogout(){localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.href='/'}
+function confirmLogout(){localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/')}
 async function uploadFileInput(input, type='produk'){
   const f=input.files?.[0]; if(!f) return '';
   if(f.size>5*1024*1024){alert('Ukuran foto maksimal 5 MB');input.value='';return ''}
@@ -157,6 +171,6 @@ function openChangePassword(){
     <label>Ulangi Password<input name="repeat_password" type="password" minlength="6" required></label>
     <button class="btn primary wide">Simpan Password</button>
   </form>`);
-  changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.href='/'},900)}catch(err){alert(err.message)}}
+  changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.replace('/')},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}

@@ -342,6 +342,10 @@ app.get('/api/admin/products', auth, ensureRole(['admin','kasir']), (req,res)=>{
   const q = `%${req.query.q || ''}%`;
   res.json({ ok:true, data: all('SELECT * FROM products WHERE toko_id=? AND (nama LIKE ? OR barcode LIKE ? OR kategori LIKE ?) ORDER BY nama ASC', [req.user.toko_id,q,q,q]) });
 });
+app.get('/api/products', auth, ensureRole(['admin','kasir']), (req,res)=>{
+  const q = `%${req.query.q || ''}%`;
+  res.json({ ok:true, data: all('SELECT * FROM products WHERE toko_id=? AND (nama LIKE ? OR barcode LIKE ? OR kategori LIKE ?) ORDER BY nama ASC', [req.user.toko_id,q,q,q]) });
+});
 app.post('/api/admin/products', auth, ensureRole(['admin']), (req,res)=>{
   const toko=tokoFor(req.user); const lim=packageLimit(toko);
   const count=get('SELECT COUNT(*) c FROM products WHERE toko_id=?',[req.user.toko_id]).c;
@@ -431,8 +435,9 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), (req,res)=>{
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
   const status=b.metode==='UTANG'?'UTANG':'LUNAS';
+  const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
   const info=run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',nowJakartaSQL()]);
+    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',createdAt]);
   const trxId=info.lastInsertRowid;
   const ins=db.prepare('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)');
   for (const it of items) {
@@ -459,6 +464,14 @@ app.post('/api/change-password', auth, (req,res)=>{
   res.json({ok:true});
 });
 
+
+app.put('/api/me/theme', auth, (req,res)=>{
+  const mode=['eye','light','dark'].includes(req.body.mode_tema)?req.body.mode_tema:'eye';
+  const warna=['blue','green','purple','orange','black'].includes(req.body.warna_tema)?req.body.warna_tema:'blue';
+  run('UPDATE users SET mode_tema=?, warna_tema=? WHERE id=?',[mode,warna,req.user.id]);
+  res.json({ok:true, mode_tema:mode, warna_tema:warna});
+});
+
 app.get('/api/receipt/:id', auth, (req,res)=>{
   const tr=get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.id=?',[req.params.id]);
   if(!tr || (req.user.role!=='developer' && tr.toko_id!==req.user.toko_id)) return res.status(404).json({ok:false});
@@ -470,6 +483,8 @@ app.get('/api/receipt/:id', auth, (req,res)=>{
 // ===== TECNO POS LEVEL TINGGI: Supplier, Restock, Member, Promo, Log, AI, Absensi, Target =====
 function col(table, name, type){ try{ db.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`).run(); }catch(e){} }
 function migrateProTables(){
+col('users','mode_tema','TEXT DEFAULT \"eye\"');
+col('users','warna_tema','TEXT DEFAULT \"blue\"');
 col('products','supplier_id','INTEGER DEFAULT 0');
 col('products','expired_at','TEXT DEFAULT ""');
 col('products','rak','TEXT DEFAULT ""');
