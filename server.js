@@ -51,6 +51,16 @@ async function run(sql, params = []) {
 async function get(sql, params = []) { const r = await pool.query(toPgSql(sql), params); return r.rows[0]; }
 async function all(sql, params = []) { const r = await pool.query(toPgSql(sql), params); return r.rows; }
 async function exec(sql) { await pool.query(sql); }
+
+async function log(user, aksi, detail='') {
+  try {
+    const userId = user?.id || 0;
+    const tokoId = user?.toko_id || 0;
+    await run('INSERT INTO audit_logs (user_id,toko_id,aksi,detail) VALUES (?,?,?,?)', [userId, tokoId, String(aksi||''), String(detail||'')]);
+  } catch (e) {
+    console.log('AUDIT LOG SKIP:', e.message);
+  }
+}
 async function initDb(){ await pool.query('SELECT 1'); }
 function now() { return new Date().toISOString(); }
 function rupiah(n) { return Number(n || 0); }
@@ -209,9 +219,7 @@ app.post('/api/login', async (req,res)=>{
   let toko = user.role === 'developer' ? null : await get('SELECT * FROM tokos WHERE id=?', [user.toko_id]);
   toko = toko ? await suspendExpiredToko(toko) : toko;
   if (toko && toko.status !== 'AKTIF') return res.status(403).json({ ok:false, message: toko.status==='SUSPEND' ? 'Toko disuspend / masa aktif habis. Hubungi developer.' : 'Toko nonaktif, hubungi developer' });
- if (typeof log === 'function') {
-   await log(user,'LOGIN',user.username);
-}
+  await log(user, 'LOGIN', user.username);
   res.json({ ok:true, user: { id:user.id, nama:user.nama, username:user.username, role:user.role, toko_id:user.toko_id }, toko });
 });
 
