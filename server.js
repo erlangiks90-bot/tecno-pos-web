@@ -209,7 +209,9 @@ app.post('/api/login', async (req,res)=>{
   let toko = user.role === 'developer' ? null : await get('SELECT * FROM tokos WHERE id=?', [user.toko_id]);
   toko = toko ? await suspendExpiredToko(toko) : toko;
   if (toko && toko.status !== 'AKTIF') return res.status(403).json({ ok:false, message: toko.status==='SUSPEND' ? 'Toko disuspend / masa aktif habis. Hubungi developer.' : 'Toko nonaktif, hubungi developer' });
-  await log(user, 'LOGIN', user.username);
+ if (typeof log === 'function') {
+   await log(user,'LOGIN',user.username);
+}
   res.json({ ok:true, user: { id:user.id, nama:user.nama, username:user.username, role:user.role, toko_id:user.toko_id }, toko });
 });
 
