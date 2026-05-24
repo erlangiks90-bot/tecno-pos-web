@@ -148,3 +148,77 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
   body.search-open .product-popup{top:130px!important;bottom:12px!important;border-radius:20px!important;}
   body.search-open .cart{pointer-events:none!important;}
 }
+
+/* ===== ADMIN HP FIX: Tambah Produk menjadi popup/bottom sheet yang rapi ===== */
+@media(max-width:760px){
+  body:has(.product-form){overflow:hidden!important;}
+  .modal{align-items:flex-end!important;padding:0!important;background:rgba(2,6,23,.62)!important;z-index:9999!important;}
+  .modal-card:has(.product-form){
+    width:100%!important;
+    max-width:100%!important;
+    max-height:88svh!important;
+    border-radius:24px 24px 0 0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:var(--card)!important;
+    box-shadow:0 -18px 60px rgba(0,0,0,.35)!important;
+  }
+  .modal-card:has(.product-form) .modal-head{
+    position:sticky!important;
+    top:0!important;
+    z-index:5!important;
+    margin:0!important;
+    padding:16px 16px 12px!important;
+    background:var(--card)!important;
+    border-bottom:1px solid var(--line)!important;
+  }
+  .modal-card:has(.product-form) .modal-head b{font-size:18px!important;font-weight:950!important;}
+  .modal-card:has(.product-form) .x{width:42px!important;height:42px!important;border-radius:14px!important;font-size:0!important;position:relative!important;}
+  .modal-card:has(.product-form) .x:after{content:'×';font-size:24px!important;line-height:1;color:var(--text);}
+  .product-form{
+    display:grid!important;
+    grid-template-columns:1fr 1fr!important;
+    gap:10px!important;
+    padding:12px 14px 96px!important;
+    max-height:calc(88svh - 70px)!important;
+    overflow:auto!important;
+    -webkit-overflow-scrolling:touch!important;
+  }
+  .product-form label{display:block!important;margin:0!important;font-size:12px!important;font-weight:900!important;color:var(--muted)!important;}
+  .product-form label small{display:none!important;}
+  .product-form input,.product-form select,.product-form textarea{
+    width:100%!important;
+    min-height:48px!important;
+    border-radius:14px!important;
+    font-size:15px!important;
+    margin-top:5px!important;
+    background:var(--bg)!important;
+    color:var(--text)!important;
+  }
+  .product-form textarea{min-height:82px!important;}
+  .product-form label:nth-child(1),
+  .product-form label:nth-child(2),
+  .product-form label:nth-child(13),
+  .product-form label.wide{
+    grid-column:1/-1!important;
+  }
+  .product-form .upload-preview{max-height:90px!important;max-width:100%!important;border-radius:14px!important;margin-top:8px!important;object-fit:cover!important;}
+  .product-form button[type="submit"], .product-form .btn.primary.wide{
+    position:fixed!important;
+    left:14px!important;
+    right:14px!important;
+    bottom:12px!important;
+    width:auto!important;
+    height:58px!important;
+    z-index:10001!important;
+    border-radius:18px!important;
+    font-size:17px!important;
+    box-shadow:0 14px 32px rgba(37,99,235,.35)!important;
+  }
+  /* Admin mobile table area tidak melebar saat modal tertutup */
+  #produk .grid{grid-template-columns:1fr!important;}
+  #produk .toolbar{display:grid!important;grid-template-columns:1fr!important;gap:8px!important;}
+  #produk .toolbar>div{display:flex!important;gap:7px!important;overflow-x:auto!important;padding-bottom:4px!important;}
+  #produk .toolbar .btn{white-space:nowrap!important;min-height:42px!important;}
+  #produk .toolbar input{width:100%!important;min-height:46px!important;}
+}
