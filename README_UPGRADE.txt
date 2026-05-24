@@ -1,0 +1,1 @@
+Upgrade ini menambahkan logout admin/developer di topbar dan fitur Developer > User > Reset Semua Password untuk reset semua akun admin/kasir. Password minimal 6 karakter. Akun developer tidak ikut diubah.

@@ -1,7 +1,7 @@
 {
-  "name": "tecno-pos-online-ready",
-  "version": "4.0.0",
-  "description": "TECNO POS Online Ready - PC, HP, Railway",
+  "name": "tecno-pos-pro",
+  "version": "3.0.0",
+  "description": "TECNO POS Pro - Multi toko, developer panel, admin toko, kasir, paket berbayar, thermal print",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,7 +10,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "multer": "^1.4.5-lts.1"
+    "sql.js": "^1.10.3"
   },
   "engines": {
     "node": ">=20"

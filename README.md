@@ -1,22 +1,57 @@
-# TECNO POS ONLINE READY
+# TECNO POS FINAL MAX BILLING
 
-Versi ini dibuat agar aman dijalankan di Railway/PC/HP tanpa better-sqlite3.
+Login awal:
+- Developer: developer / dev123
+- Admin toko: admin / admin123
+- Kasir: kasir / kasir123
 
-## Jalankan lokal
+Upgrade versi ini:
+- Developer bisa aktif/nonaktif/suspend toko.
+- Masa aktif paket per toko: expired_at.
+- Auto suspend jika masa aktif habis saat admin/kasir login.
+- Tagihan toko: buat tagihan, status bayar, tandai lunas, perpanjang masa aktif.
+- Reminder expired di admin: H-7 sampai expired.
+- Admin melihat status paket, tagihan, dan riwayat tagihan di Tentang.
+- Notifikasi admin: masa aktif, stok menipis, hutang belum lunas.
+- Backup full database dan riwayat backup.
+- Kasir transaksi tetap berjalan: cari produk, keranjang, bayar, cetak struk.
+
+Cara jalan:
 ```bash
 npm install
 npm start
 ```
-Buka: http://localhost:3000
 
-## Deploy Railway
-Build command: `npm install`
-Start command: `npm start`
-Root directory: `/`
+Buka:
+http://localhost:3000
 
-## Login awal
+Catatan:
+- Kalau deploy di Replit/Railway, jalankan `npm start`.
+- Data tersimpan di database/tecno_pos.db.
+
+## Upgrade OPERASIONAL MAX
+Tambahan versi ini:
+- Buku Kas: kas masuk, kas keluar, saldo kas.
+- Laba Bersih Real: penjualan - modal - pengeluaran + kas masuk tambahan.
+- Tutup Kas Harian: uang awal, uang sistem, uang fisik, selisih.
+- Mode Toko Buka/Tutup: jika tutup, kasir tidak bisa checkout.
+- PIN keamanan untuk refund/setting.
+- Void transaksi: kasir ajukan, admin approve/reject, stok balik otomatis saat approve.
+- Import Produk CSV: format `nama,barcode,harga_jual,stok,kategori,satuan,harga_beli`.
+- Cetak Label Harga.
+- Scan Barcode Kamera HP (menggunakan fitur browser jika tersedia; fallback input manual).
+- Pengingat backup data.
+
+Login bawaan:
 - Developer: developer / dev123
 - Admin: admin / admin123
 - Kasir: kasir / kasir123
 
-Catatan: Railway free storage bisa reset saat redeploy. Untuk produksi besar gunakan PostgreSQL.
+
+## Upgrade OPERASIONAL REAL POS
+- Admin sudah memiliki tombol Logout dengan konfirmasi keluar akun.
+- Kasir wajib Buka Kas sebelum transaksi.
+- Tutup Kas kasir menghitung uang sistem, uang fisik, dan selisih.
+- Dashboard Admin Live menampilkan omzet, transaksi, item terjual, kas masuk/keluar, hutang, dan shift aktif.
+- Keranjang kasir auto-save di browser, jadi tidak hilang saat reload.
+- Shortcut kasir: F1 cari produk, F2 bayar, F3 simpan keranjang, F4 riwayat, Esc tutup modal/kosongkan pencarian.
