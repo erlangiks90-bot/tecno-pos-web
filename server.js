@@ -208,6 +208,22 @@ function migrate() {
     const ins = db.prepare('INSERT INTO products (toko_id,barcode,nama,kategori,satuan,harga_beli,harga_jual,harga_grosir,stok) VALUES (?,?,?,?,?,?,?,?,?)');
     for (const p of sample) ins.run([t.id, ...p]);
   }
+  // Jika database lama sudah ada tapi produk kosong/berbeda toko, pastikan setiap toko punya contoh barang agar kasir tidak kosong.
+  const tokosAll = all('SELECT id FROM tokos');
+  for (const tokoRow of tokosAll) {
+    const pc = get('SELECT COUNT(*) c FROM products WHERE toko_id=?', [tokoRow.id]);
+    if (Number(pc?.c || 0) === 0) {
+      const sample2 = [
+        ['899999900001','Indomie Goreng','Makanan','PCS',2500,3500,3200,40],
+        ['899999900002','Aqua 600ml','Minuman','PCS',2500,4000,3700,25],
+        ['899999900003','Kopi Sachet','Minuman','PCS',1000,2000,1800,60],
+        ['899999900004','Sabun Mandi','Kebutuhan','PCS',3000,5000,4500,14],
+        ['899999900005','Pulsa Manual','Jasa','TRX',0,10000,10000,9999]
+      ];
+      const ins2 = db.prepare('INSERT INTO products (toko_id,barcode,nama,kategori,satuan,harga_beli,harga_jual,harga_grosir,stok) VALUES (?,?,?,?,?,?,?,?,?)');
+      for (const p of sample2) ins2.run([tokoRow.id, ...p]);
+    }
+  }
 }
 
 function log(user, aksi, detail='') {
@@ -251,10 +267,12 @@ function daysLeft(v){ if(!v) return null; return Math.ceil((new Date(String(v).s
 function billingStatus(toko){ if(!toko) return {expired:false,days_left:null,reminder:''}; const dl=daysLeft(toko.expired_at); const expired=isExpiredDate(toko.expired_at); let reminder=''; if(expired) reminder='Masa aktif habis'; else if(dl!==null && dl<=7) reminder=`Masa aktif tinggal ${dl} hari`; return {expired,days_left:dl,reminder}; }
 function suspendExpiredToko(toko){ if(toko && toko.status==='AKTIF' && isExpiredDate(toko.expired_at)){ run("UPDATE tokos SET status='SUSPEND', payment_status='EXPIRED' WHERE id=?", [toko.id]); return {...toko,status:'SUSPEND',payment_status:'EXPIRED'}; } return toko; }
 
-app.get('/', (req,res)=>res.sendFile(path.join(__dirname,'public','login.html')));
-app.get('/developer.html', (req,res)=>res.sendFile(path.join(__dirname,'public','developer.html')));
-app.get('/admin.html', (req,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
-app.get('/kasir.html', (req,res)=>res.sendFile(path.join(__dirname,'public','kasir.html')));
+// Route halaman dibuat jelas agar Railway/GitHub tidak nyasar ke 404.
+app.get(['/','/login','/login.html'], (req,res)=>res.sendFile(path.join(__dirname,'public','login.html')));
+app.get(['/developer','/developer.html'], (req,res)=>res.sendFile(path.join(__dirname,'public','developer.html')));
+app.get(['/admin','/admin.html'], (req,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
+app.get(['/kasir','/kasir.html'], (req,res)=>res.sendFile(path.join(__dirname,'public','kasir.html')));
+app.get('/health', (req,res)=>res.status(200).send('OK'));
 
 app.post('/api/login', (req,res)=>{
   const { username, password } = req.body;

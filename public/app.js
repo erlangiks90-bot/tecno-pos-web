@@ -60,7 +60,7 @@ function setupPhoneBackGuard(defaultId){
 }
 function setupShell(title, subtitle=''){
   qs('#pageTitle')&&(qs('#pageTitle').textContent=title);qs('#sideTitle')&&(qs('#sideTitle').textContent=title);qs('#sideSub')&&(qs('#sideSub').textContent=subtitle||API.user?.nama||'');
-  qs('#hamb')&&(qs('#hamb').onclick=()=>qs('#sidebar').classList.toggle('open'));
+  const hb=qs('#hamb'), sb=qs('#sidebar'); if(hb&&sb){hb.onclick=null; hb.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();sb.classList.toggle('open');});}
   qsa('[data-nav]').forEach(b=>{b.type='button';b.onclick=()=>showSection(b.dataset.nav,true)});
   qsa('button:not([type])').forEach(b=>{ if(!b.closest('form')) b.type='button'; });
   setTimeout(()=>setupPhoneBackGuard(activeSectionId()),80);
@@ -136,3 +136,12 @@ function openChangePassword(){
   changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.href='/'},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}
+
+// Tutup sidebar jika klik area luar di HP, tapi hamburger tetap aman.
+document.addEventListener('click', e=>{
+  const sb=qs('#sidebar'), hb=qs('#hamb');
+  if(!sb || !hb) return;
+  if(window.innerWidth<=900 && sb.classList.contains('open') && !sb.contains(e.target) && !hb.contains(e.target)){
+    sb.classList.remove('open');
+  }
+});
