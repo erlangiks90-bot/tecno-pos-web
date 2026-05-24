@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kasir - TECNO POS</title><link rel="stylesheet" href="/style.css"></head><body class="kasir-fullscreen"><div class="app"><aside id="sidebar" class="sidebar"><div class="side-brand"><div class="logo-box" id="logoBox">TK</div><div><div id="sideTitle" class="side-title">NAMA TOKO</div><div id="sideSub" class="side-sub">Kasir Toko</div></div></div><div class="nav"><button class="active" data-nav="kasirPage">Kasir</button><button data-nav="riwayat">Riwayat</button><button data-nav="tampilan">Tampilan</button><button data-nav="memberKasir">Member</button><button data-nav="absensi">Absensi</button><button data-nav="asisten">Asisten AI</button><button data-nav="profil">Profil</button></div><div class="side-bottom"><button class="btn danger" onclick="logout()" style="width:100%">Logout</button></div></aside><main class="main"><header class="topbar"><button id="hamb" class="hamb">☰</button><div class="page-title" id="pageTitle">Kasir</div><div><b id="topStore"></b></div></header><div class="content">
-<section id="kasirPage" class="section active"><div id="shiftPanelKasir" class="shift-panel"></div><div class="shortcut-hint">Shortcut: <b>F1</b> cari produk • <b>F2</b> bayar • <b>F3</b> simpan keranjang • <b>F4</b> riwayat • <b>Esc</b> kosongkan pencarian</div><div class="pos-layout"><div class="pos-search-panel"><div class="searchbar pos-searchbar"><input id="search" placeholder="Cari / scan barcode barang..." autofocus><button class="btn primary" onclick="loadProducts('popup')">Cari</button><button class="btn" onclick="openCameraScanner()">Scan</button></div><div id="productGrid" class="product-grid product-popup"></div></div><div class="card cart"><h3>Keranjang</h3><select id="memberSelect"><option value="0">Pelanggan umum</option></select><div id="cartItems" class="cart-items"></div><div class="summary"><div class="sumrow"><span>Subtotal</span><b id="subtotal">Rp 0</b></div><div class="sumrow"><span>Diskon / Voucher</span><button class="btn mini" onclick="openDiscountPopup()" type="button"><span id="discountLabel">Atur</span></button></div><select id="voucher" class="hidden"><option value="">Tanpa voucher</option></select><input id="diskon" class="hidden" type="number" value="0"><input id="pajak" class="hidden" type="number" value="0"><input id="biaya" class="hidden" type="number" value="0"><div class="sumrow total"><span>TOTAL</span><span id="total">Rp 0</span></div><input id="customer" placeholder="Nama pelanggan / umum"><input id="bayar" type="number" placeholder="Nominal bayar"><select id="metode"><option>TUNAI</option><option>QRIS</option><option>TRANSFER</option><option>UTANG</option></select><div class="pay-grid"><button class="btn warn" onclick="holdCart()">Simpan Keranjang</button><button class="btn" onclick="clearCart()">Kosongkan</button><button class="btn primary" style="grid-column:1/-1" onclick="checkout()">BAYAR & CETAK</button></div></div></div></div></section>
+<section id="kasirPage" class="section active"><div id="shiftPanelKasir" class="shift-panel"></div><div class="shortcut-hint">Shortcut: <b>F1</b> cari produk • <b>F2</b> bayar • <b>F3</b> simpan keranjang • <b>F4</b> riwayat • <b>Esc</b> kosongkan pencarian</div><div class="pos-layout"><div class="pos-search-panel"><div class="searchbar pos-searchbar"><input id="search" placeholder="Cari / scan barcode barang..." autofocus><button class="btn primary" onclick="loadProducts(true)">Cari</button><button class="btn" onclick="openCameraScanner()">Scan</button></div><div id="productGrid" class="product-grid product-popup"></div></div><div class="card cart"><h3>Keranjang</h3><select id="memberSelect"><option value="0">Pelanggan umum</option></select><div id="cartItems" class="cart-items"></div><div class="summary"><div class="sumrow"><span>Subtotal</span><b id="subtotal">Rp 0</b></div><div class="sumrow"><span>Voucher</span><select id="voucher"><option value="">Tanpa voucher</option></select></div><div class="sumrow"><span>Diskon</span><input id="diskon" type="number" value="0" style="width:120px"></div><div class="sumrow"><span>Pajak</span><input id="pajak" type="number" value="0" style="width:120px"></div><div class="sumrow"><span>Biaya</span><input id="biaya" type="number" value="0" style="width:120px"></div><div class="sumrow total"><span>TOTAL</span><span id="total">Rp 0</span></div><input id="customer" placeholder="Nama pelanggan / umum"><input id="bayar" type="number" placeholder="Nominal bayar"><select id="metode"><option>TUNAI</option><option>QRIS</option><option>TRANSFER</option><option>UTANG</option></select><div class="pay-grid"><button class="btn warn" onclick="holdCart()">Simpan Keranjang</button><button class="btn" onclick="clearCart()">Kosongkan</button><button class="btn primary" style="grid-column:1/-1" onclick="checkout()">BAYAR & CETAK</button></div></div></div></div></section>
 <section id="riwayat" class="section"><div class="toolbar"><button class="btn" onclick="loadTransactions()">Refresh</button></div><div id="historyTable"></div><h3>Hold Keranjang</h3><div id="holdTable"></div></section>
 <section id="memberKasir" class="section"><div class="card"><h3>Member Pelanggan</h3><p>Kasir bisa memilih member saat transaksi. Tambah/edit member dilakukan admin toko.</p><div id="memberTable"></div></div></section>
 <section id="absensi" class="section"><div class="card"><h3>Absensi Kasir</h3><p>Gunakan saat mulai dan selesai bekerja.</p><button class="btn ok" onclick="absenMasuk()">Absen Masuk</button> <button class="btn danger" onclick="absenPulang()">Absen Pulang</button><p id="absenInfo"></p></div></section>
@@ -30,30 +30,8 @@ function closeShiftModal(){modal(`<div class="modal-head"><b>Tutup Kas</b><butto
 function bindShortcuts(){document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!['F1','F2','F3','F4','Escape'].includes(e.key))return; if(e.key==='F1'){e.preventDefault();showSection('kasirPage');search.focus()} if(e.key==='F2'){e.preventDefault();checkout()} if(e.key==='F3'){e.preventDefault();holdCart()} if(e.key==='F4'){e.preventDefault();showSection('riwayat');loadTransactions()} if(e.key==='Escape'){if(document.querySelector('.modal'))closeModal(); else search.value='';}})}
 
 function storeBrand(){const t=API.toko||{};sideTitle.textContent=t.nama_toko||'NAMA TOKO';topStore.textContent=t.nama_toko||'';profName.textContent=API.user.nama+' - '+(t.nama_toko||'');if(t.logo){logoBox.innerHTML=`<img src="${t.logo}">`}else{logoBox.textContent=(t.nama_toko||'TK').slice(0,2).toUpperCase()}}
-async function loadProducts(mode='popup'){
-  const q=(search.value||'').trim();
-  if(!q){ PRODUCTS=[]; renderProducts(); closeSearchPopup(); return; }
-  try{
-    const j=await api('/api/admin/products?q='+encodeURIComponent(q));
-    PRODUCTS=Array.isArray(j.data)?j.data:[];
-    renderProducts(q);
-
-    // Mode scan/Enter barcode: kalau barcode sama persis, langsung masuk keranjang.
-    const exact=PRODUCTS.find(p=>String(p.barcode||'').trim()===q);
-    if(mode==='scan' && exact){ addCart(exact); search.value=''; closeSearchPopup(); return; }
-
-    // Mode ketik biasa: selalu tampilkan popup, jangan langsung masuk keranjang,
-    // supaya keranjang dan pembayaran tidak bergeser.
-    openSearchPopup();
-  }catch(e){
-    PRODUCTS=[]; renderProducts(q,'Gagal mengambil data barang. Cek koneksi/server.'); openSearchPopup();
-  }
-}
-function renderProducts(q='',err=''){
-  const list = err ? `<div class="empty-result danger">${err}</div>` :
-    (PRODUCTS.length ? PRODUCTS.map(p=>`<button class="prod-result" type="button" onclick="addCart(${p.id});closeSearchPopup();search.value='';search.focus()"><div><b>${p.nama}</b><span>${p.barcode||'-'} • ${p.kategori||'Umum'} • Stok ${p.stok} ${p.satuan||'PCS'}</span></div><strong>${rp(p.harga_jual)}</strong></button>`).join('') : `<div class="empty-result">Barang tidak ditemukan untuk: <b>${q||'-'}</b></div>`);
-  productGrid.innerHTML=`<div class="popup-head"><b>Hasil pencarian barang</b><button class="x" onclick="closeSearchPopup();search.focus()">X</button></div>${list}`;
-}
+async function loadProducts(showPopup=false){let q=(search.value||'').trim();let j=await api('/api/admin/products?q='+encodeURIComponent(q));PRODUCTS=j.data;renderProducts();if(q && (showPopup||window.innerWidth<=760))openSearchPopup();if(PRODUCTS.length===1 && q){addCart(PRODUCTS[0]);search.value='';closeSearchPopup();}}
+function renderProducts(){productGrid.innerHTML=`<div class="popup-head"><b>Hasil pencarian barang</b><button class="x" onclick="closeSearchPopup()">X</button></div>`+(PRODUCTS.map(p=>`<div class="prod-card"><h4>${p.nama}</h4><div class="side-sub">${p.barcode||'-'} • ${p.kategori} • Rak ${p.rak||'-'}</div><div>Stok: <b>${p.stok}</b> ${p.satuan}</div><div class="price">${rp(p.harga_jual)}</div><button class="btn primary" style="width:100%;margin-top:10px" onclick="addCart(${p.id});closeSearchPopup();search.focus()">Tambah</button></div>`).join('')||'<div class="card">Produk tidak ditemukan</div>')}
 function addCart(p){if(typeof p==='number')p=PRODUCTS.find(x=>x.id===p);if(!p)return;let row=CART.find(x=>x.id===p.id);if(row)row.qty++;else CART.push({id:p.id,nama:p.nama,harga:p.harga_jual,harga_member:p.harga_member||0,qty:1,stok:p.stok});renderCart();toast('Masuk keranjang: '+p.nama)}
 function openSearchPopup(){document.body.classList.add('search-open')}
 function closeSearchPopup(){document.body.classList.remove('search-open')}
@@ -61,10 +39,8 @@ function priceOf(c){return Number(memberSelect.value)>0 && c.harga_member>0 ? Nu
 function renderCart(){cartItems.innerHTML=CART.map((c,i)=>`<div class="cart-row"><div><b>${c.nama}</b><div>${rp(priceOf(c))} x ${c.qty} = <b>${rp(priceOf(c)*c.qty)}</b></div></div><div class="qty"><button onclick="chg(${i},-1)">-</button><b>${c.qty}</b><button onclick="chg(${i},1)">+</button><button onclick="rm(${i})">×</button></div></div>`).join('')||'<div class="side-sub">Keranjang kosong</div>';saveCartAuto();calc()}
 function chg(i,n){CART[i].qty+=n;if(CART[i].qty<=0)CART.splice(i,1);renderCart()}function rm(i){CART.splice(i,1);renderCart()}
 function promoDiskon(sub){let id=Number(voucher.value||0),p=PROMOS.find(x=>x.id===id);if(!p||p.status!=='AKTIF')return 0;return p.tipe==='PERSEN'?Math.floor(sub*Number(p.nilai)/100):Number(p.nilai)}
-function calc(){let sub=CART.reduce((s,x)=>s+priceOf(x)*x.qty,0),auto=promoDiskon(sub),d=Number(diskon.value||0)+auto,p=Number(pajak.value||0),b=Number(biaya.value||0),tot=sub-d+p+b;subtotal.textContent=rp(sub);total.textContent=rp(tot);if(document.getElementById('discountLabel')){let parts=[]; if(Number(diskon.value||0))parts.push('Diskon '+rp(diskon.value)); if(auto)parts.push('Voucher '+rp(auto)); if(p)parts.push('Pajak '+rp(p)); if(b)parts.push('Biaya '+rp(b)); discountLabel.textContent=parts.length?parts.join(' • '):'Atur';}if(!bayar.value||Number(bayar.value)<tot)bayar.value=metode.value==='UTANG'?0:tot;return {sub,d,p,b,tot}}
+function calc(){let sub=CART.reduce((s,x)=>s+priceOf(x)*x.qty,0),auto=promoDiskon(sub),d=Number(diskon.value||0)+auto,p=Number(pajak.value||0),b=Number(biaya.value||0),tot=sub-d+p+b;subtotal.textContent=rp(sub);total.textContent=rp(tot);if(!bayar.value||Number(bayar.value)<tot)bayar.value=metode.value==='UTANG'?0:tot;return {sub,d,p,b,tot}}
 diskon.oninput=calc;pajak.oninput=calc;biaya.oninput=calc;metode.onchange=calc;voucher.onchange=calc;memberSelect.onchange=renderCart;
-function openDiscountPopup(){modal(`<div class="modal-head"><b>Atur Diskon & Biaya</b><button class="x" onclick="closeModal()">X</button></div><div class="form discount-form"><label>Voucher<select id="popVoucher">${voucher.innerHTML}</select></label><label>Diskon Manual (Rp)<input id="popDiskon" type="number" value="${diskon.value||0}"></label><label>Pajak (Rp)<input id="popPajak" type="number" value="${pajak.value||0}"></label><label>Biaya Tambahan (Rp)<input id="popBiaya" type="number" value="${biaya.value||0}"></label><button class="btn primary wide" onclick="saveDiscountPopup()">Simpan</button></div>`);popVoucher.value=voucher.value||'';}
-function saveDiscountPopup(){voucher.value=popVoucher.value;diskon.value=popDiskon.value||0;pajak.value=popPajak.value||0;biaya.value=popBiaya.value||0;closeModal();calc();saveCartAuto();}
 function clearCart(){CART=[];renderCart();customer.value='';diskon.value=0;pajak.value=0;biaya.value=0;bayar.value='';voucher.value='';localStorage.removeItem(CART_KEY)}
 async function holdCart(){if(!CART.length)return alert('Keranjang kosong');let j=await api('/api/kasir/hold',{method:'POST',body:{customer:customer.value||'Umum',items:CART}});toast('Keranjang disimpan: '+j.kode);clearCart();loadHolds()}
 async function checkout(){if(!CART.length)return alert('Keranjang kosong');try{let c=calc();let items=CART.map(x=>({...x,harga:priceOf(x)}));let j=await api('/api/kasir/checkout',{method:'POST',body:{items,customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',member_id:memberSelect.value,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||''}});window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};printReceipt(j.toko,j.transaction,j.items);clearCart();loadProducts(false);loadTransactions();}catch(e){alert(e.message)}}
@@ -78,47 +54,25 @@ async function loadAI(){let j=await api('/api/ai/insight');aiText.textContent=j.
 function askLocalAI(){let q=aiInput.value.toLowerCase();let bayar=(q.match(/\d+/)||[])[0];let tot=calc().tot;if(q.includes('kembalian')&&bayar){aiAnswer.textContent='Kembalian: '+rp(Number(bayar)-tot)}else aiAnswer.textContent='Gunakan tombol Tanya AI untuk ringkasan toko, atau ketik: hitung kembalian 100000.'}
 async function absenMasuk(){let j=await api('/api/kasir/attendance/in',{method:'POST',body:{}});absenInfo.textContent=j.message||'Absen masuk berhasil';toast(absenInfo.textContent)}
 async function absenPulang(){await api('/api/kasir/attendance/out',{method:'POST',body:{}});absenInfo.textContent='Absen pulang berhasil';toast('Absen pulang berhasil')}
-search.setAttribute('autocomplete','off');
-search.setAttribute('enterkeyhint','search');
-search.addEventListener('keydown',e=>{
-  if(e.key==='Enter'){e.preventDefault();loadProducts('scan')}
-  if(e.key==='Escape'){closeSearchPopup();search.value=''}
-});
-search.addEventListener('input',()=>{
-  clearTimeout(window.__searchDelay);
-  const q=search.value.trim();
-  if(!q){PRODUCTS=[];renderProducts();closeSearchPopup();return}
-  window.__searchDelay=setTimeout(()=>loadProducts('popup'),180);
-});
-document.addEventListener('click',e=>{
-  if(document.body.classList.contains('search-open') && !e.target.closest('.product-popup') && !e.target.closest('.pos-searchbar')) closeSearchPopup();
-});
+search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProducts(true)} if(e.key==='Escape'){closeSearchPopup()}});
+search.addEventListener('input',()=>{clearTimeout(window.__searchDelay);let q=search.value.trim();if(!q){closeSearchPopup();return}window.__searchDelay=setTimeout(()=>loadProducts(true),250)});
+document.addEventListener('click',e=>{if(document.body.classList.contains('search-open')&&!e.target.closest('.pos-search-panel'))closeSearchPopup()});
 
 async function requestVoid(id){let alasan=prompt('Alasan batal/void transaksi?');if(!alasan)return;await api('/api/kasir/void-request',{method:'POST',body:{transaksi_id:id,alasan}});toast('Permintaan void dikirim ke admin')}
-let scanStream=null, scanTimer=null;
-function bindMobileSearch(){
-}
+let scanStream=null;
 async function openCameraScanner(){
-  const secure=location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1';
-  modal(`<div class="modal-head no-print"><b>Scan Barcode HP</b><button class="x" onclick="closeScanner()">X</button></div><div class="scan-modal"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-line"></div><p class="notice info"><b>Tips:</b> Scan kamera butuh Chrome Android dan link HTTPS. Jika kamera tidak membaca otomatis, ketik barcode atau pakai scanner barcode Bluetooth mode keyboard lalu tekan Enter.</p><div class="searchbar scan-manual"><input id="manualBarcode" inputmode="numeric" autocomplete="off" placeholder="Ketik / tempel hasil barcode"><button class="btn primary" onclick="useManualBarcode()">Cari</button></div></div>`);
-  setTimeout(()=>manualBarcode?.focus(),300);
-  manualBarcode?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();useManualBarcode()}});
-  if(!secure || !navigator.mediaDevices?.getUserMedia){
-    document.getElementById('scanVideo').style.display='none';
-    return;
-  }
+  const m=modal(`<div class="modal-head no-print"><b>Scan Barcode Kamera HP</b><button class="x" onclick="closeScanner()">X</button></div><div class="scan-modal"><video id="scanVideo" autoplay playsinline></video><p class="side-sub">Arahkan kamera ke barcode. Jika browser belum mendukung pembacaan otomatis, ketik hasil barcode di bawah.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik / tempel barcode"><button class="btn primary" onclick="useManualBarcode()">Cari</button></div></div>`);
   try{
-    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
     scanVideo.srcObject=scanStream;
     if('BarcodeDetector' in window){
-      const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code']});
-      const tick=async()=>{try{if(!document.getElementById('scanVideo'))return;let codes=await detector.detect(scanVideo);if(codes.length){search.value=codes[0].rawValue;closeScanner();loadProducts('scan');return}}catch(e){} requestAnimationFrame(tick)};tick();
-    }else{
-      toast('Browser belum mendukung auto scan. Gunakan input manual / scanner Bluetooth keyboard.');
+      const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','qr_code']});
+      const tick=async()=>{try{if(!document.getElementById('scanVideo'))return;let codes=await detector.detect(scanVideo);if(codes.length){search.value=codes[0].rawValue;closeScanner();loadProducts();return}}catch(e){} requestAnimationFrame(tick)};tick();
     }
-  }catch(e){document.getElementById('scanVideo').style.display='none';toast('Kamera tidak bisa dibuka. Cek izin kamera browser.');}
+  }catch(e){alert('Kamera tidak bisa dibuka. Pastikan izin kamera aktif atau gunakan input manual.')}
 }
-function useManualBarcode(){let v=document.getElementById('manualBarcode')?.value?.trim();if(!v)return;search.value=v;closeScanner();loadProducts('scan')}
-function closeScanner(){try{scanStream?.getTracks()?.forEach(t=>t.stop())}catch(e){};scanStream=null;closeModal()}
+function useManualBarcode(){search.value=document.getElementById('manualBarcode').value;closeScanner();loadProducts()}
+function closeScanner(){try{scanStream?.getTracks()?.forEach(t=>t.stop())}catch(e){};closeModal()}
 
-
+Promise.allSettled([loadProducts(),loadTransactions(),loadMembers(),loadPromos(),loadShift()]);renderCart();restoreCartAuto();bindShortcuts();setInterval(loadShift,30000);
+</script></body></html>

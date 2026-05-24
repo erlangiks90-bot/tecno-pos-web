@@ -41,38 +41,9 @@ async function uploadFileInput(input, type='produk'){
   return j.url;
 }
 
-
-let __backGuardReady=false;
-function activeSectionId(){return qs('.section.active')?.id||qsa('.section')[0]?.id||'dashboard'}
-function setupPhoneBackGuard(defaultId){
-  if(__backGuardReady) return; __backGuardReady=true;
-  const start=activeSectionId()||defaultId;
-  try{history.replaceState({pos:true,section:start},'',location.pathname+'#'+start);history.pushState({pos:true,section:start,lock:true},'',location.pathname+'#'+start)}catch(e){}
-  window.addEventListener('popstate',()=>{
-    const m=qs('.modal');
-    if(m){m.remove();try{history.pushState({pos:true,section:activeSectionId(),lock:true},'',location.pathname+'#'+activeSectionId())}catch(e){};return;}
-    const side=qs('#sidebar');
-    if(side?.classList.contains('open')){side.classList.remove('open');try{history.pushState({pos:true,section:activeSectionId(),lock:true},'',location.pathname+'#'+activeSectionId())}catch(e){};return;}
-    const cur=activeSectionId();
-    if(cur && cur!==defaultId){showSection(defaultId,false);}else{toast('Gunakan tombol Logout untuk keluar dari aplikasi.');}
-    try{history.pushState({pos:true,section:activeSectionId(),lock:true},'',location.pathname+'#'+activeSectionId())}catch(e){}
-  });
-}
-function setupShell(title, subtitle=''){
-  qs('#pageTitle')&&(qs('#pageTitle').textContent=title);qs('#sideTitle')&&(qs('#sideTitle').textContent=title);qs('#sideSub')&&(qs('#sideSub').textContent=subtitle||API.user?.nama||'');
-  const hb=qs('#hamb'), sb=qs('#sidebar'); if(hb&&sb){hb.onclick=null; hb.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();sb.classList.toggle('open');});}
-  qsa('[data-nav]').forEach(b=>{b.type='button';b.onclick=()=>showSection(b.dataset.nav,true)});
-  qsa('button:not([type])').forEach(b=>{ if(!b.closest('form')) b.type='button'; });
-  setTimeout(()=>setupPhoneBackGuard(activeSectionId()),80);
-}
-function showSection(id,push=true){
-  qsa('.section').forEach(s=>s.classList.remove('active'));qsa('[data-nav]').forEach(b=>b.classList.remove('active'));
-  qs('#'+id)?.classList.add('active');qs(`[data-nav="${id}"]`)?.classList.add('active');
-  qs('#pageTitle')&&(qs('#pageTitle').textContent=qs(`[data-nav="${id}"]`)?.textContent.trim()||'TECNO POS');qs('#sidebar')?.classList.remove('open');
-  if(push){try{history.pushState({pos:true,section:id},'',location.pathname+'#'+id)}catch(e){}}
-}
-
-function modal(html){let m=document.createElement('div');m.className='modal';m.innerHTML=`<div class="modal-card">${html}</div>`;document.body.appendChild(m);try{history.pushState({pos:true,modal:true,section:activeSectionId?.()},'',location.pathname+'#modal')}catch(e){};return m}
+function setupShell(title, subtitle=''){qs('#pageTitle')&&(qs('#pageTitle').textContent=title);qs('#sideTitle')&&(qs('#sideTitle').textContent=title);qs('#sideSub')&&(qs('#sideSub').textContent=subtitle||API.user?.nama||'');qs('#hamb')&&(qs('#hamb').onclick=()=>qs('#sidebar').classList.toggle('open'));qsa('[data-nav]').forEach(b=>b.onclick=()=>showSection(b.dataset.nav));}
+function showSection(id){qsa('.section').forEach(s=>s.classList.remove('active'));qsa('[data-nav]').forEach(b=>b.classList.remove('active'));qs('#'+id)?.classList.add('active');qs(`[data-nav="${id}"]`)?.classList.add('active');qs('#pageTitle')&&(qs('#pageTitle').textContent=qs(`[data-nav="${id}"]`)?.textContent.trim()||'TECNO POS');qs('#sidebar')?.classList.remove('open')}
+function modal(html){let m=document.createElement('div');m.className='modal';m.innerHTML=`<div class="modal-card">${html}</div>`;document.body.appendChild(m);return m}
 function closeModal(){document.querySelector('.modal')?.remove()}
 function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${typeof c[1]==='function'?c[1](r):(r[c[1]]??'')}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
 function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No: ${tr.invoice}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${new Date(tr.created_at).toLocaleString('id-ID')}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
@@ -136,12 +107,3 @@ function openChangePassword(){
   changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.href='/'},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}
-
-// Tutup sidebar jika klik area luar di HP, tapi hamburger tetap aman.
-document.addEventListener('click', e=>{
-  const sb=qs('#sidebar'), hb=qs('#hamb');
-  if(!sb || !hb) return;
-  if(window.innerWidth<=900 && sb.classList.contains('open') && !sb.contains(e.target) && !hb.contains(e.target)){
-    sb.classList.remove('open');
-  }
-});
