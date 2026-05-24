@@ -105,3 +105,46 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
 /* Mobile POS: voucher/diskon/pajak/biaya dibuat popup agar keranjang tidak ketutup */
 .hidden{display:none!important}.hidden-extra-control{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}.pos-extra-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.pos-extra-actions .btn{padding:10px 6px;font-size:13px}.extra-values{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 10px;color:#64748b;font-size:12px}.extra-values span{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:7px}.extra-modal{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}.extra-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px)}.extra-modal-card{position:relative;width:min(420px,96vw);background:#fff;border-radius:20px;padding:16px;box-shadow:0 24px 80px rgba(0,0,0,.25)}.extra-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}.extra-box label{display:block;font-weight:700;margin-bottom:8px}.extra-box input,.extra-box select{width:100%;min-height:46px;border:1px solid #cbd5e1;border-radius:12px;padding:10px 12px;font-size:16px;background:white}
 @media(max-width:760px){body.kasir-fullscreen .content{padding-bottom:110px}.cart .summary{padding-bottom:10px}.pos-extra-actions{position:relative;z-index:2;grid-template-columns:repeat(4,minmax(0,1fr))}.extra-values{grid-template-columns:1fr 1fr}.extra-modal{align-items:flex-end;padding:10px}.extra-modal-card{width:100%;border-radius:20px 20px 12px 12px}.cart-items{max-height:calc(100vh - 410px);overflow:auto}.sumrow.total{position:sticky;bottom:0;background:#fff;z-index:3;padding:10px 0;border-top:1px solid #e5e7eb}}
+
+/* ===== V3: Layout HP seperti contoh - keranjang tidak ketutup, total besar sticky bawah ===== */
+@media(max-width:760px){
+  body.kasir-fullscreen{background:#f4f7fb!important;}
+  .kasir-fullscreen .topbar{height:64px!important;background:#fff!important;box-shadow:0 2px 12px rgba(15,23,42,.06)}
+  .kasir-fullscreen .page-title{font-size:19px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:72vw;}
+  .kasir-fullscreen .content{padding:8px 10px 0!important;}
+  .kasir-fullscreen .pos-search-panel{top:64px!important;background:#f4f7fb!important;padding:10px 0 8px!important;}
+  .kasir-fullscreen .pos-searchbar{display:grid!important;grid-template-columns:minmax(0,1fr) 74px 78px!important;gap:8px!important;align-items:center!important;}
+  .kasir-fullscreen .pos-searchbar input{height:58px!important;border-radius:18px!important;font-size:16px!important;background:#fff!important;box-shadow:0 8px 24px rgba(15,23,42,.06);}
+  .kasir-fullscreen .pos-searchbar .btn{height:58px!important;border-radius:18px!important;font-size:16px!important;padding:0 10px!important;}
+
+  .kasir-fullscreen .cart{min-height:calc(100svh - 142px)!important;border-radius:20px!important;background:#fff!important;box-shadow:0 8px 30px rgba(15,23,42,.07)!important;padding:14px!important;overflow:hidden!important;}
+  .kasir-fullscreen .cart h3{font-size:16px!important;text-transform:uppercase;letter-spacing:.02em;margin-bottom:10px!important;}
+  .kasir-fullscreen #memberSelect{display:none!important;}
+  .kasir-fullscreen .cart-items{min-height:92px!important;max-height:calc(100svh - 455px)!important;overflow:auto!important;border-bottom:1px solid #eef2f7;padding-bottom:8px!important;}
+  .kasir-fullscreen .cart-row{border:0!important;border-bottom:1px solid #eef2f7!important;border-radius:0!important;padding:12px 2px!important;}
+  .kasir-fullscreen .cart-row b{font-size:15px;}
+  .kasir-fullscreen .qty button{background:#f8fafc!important;border:1px solid #e2e8f0!important;}
+
+  .kasir-fullscreen .summary{position:sticky!important;bottom:0!important;background:#fff!important;z-index:10!important;margin:0 -4px!important;padding:10px 4px 12px!important;border-top:0!important;box-shadow:0 -12px 28px rgba(15,23,42,.08)!important;display:grid!important;gap:9px!important;}
+  .kasir-fullscreen .summary .sumrow:first-child{font-size:14px!important;padding:2px 2px 8px!important;border-bottom:1px solid #eef2f7!important;}
+
+  /* area voucher/diskon/pajak/biaya dipotong: hanya tombol kecil, detail masuk popup */
+  .kasir-fullscreen .pos-extra-actions{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important;margin:4px 0 2px!important;}
+  .kasir-fullscreen .pos-extra-actions .btn{height:48px!important;min-width:0!important;padding:0 4px!important;border-radius:16px!important;background:#f4f7ff!important;color:#17356f!important;font-size:13px!important;box-shadow:none!important;}
+  .kasir-fullscreen .extra-values{display:none!important;}
+
+  .kasir-fullscreen .sumrow.total{order:10!important;font-size:0!important;background:#eef6ff!important;border-radius:18px!important;padding:15px 16px!important;border:1px solid #e1ecff!important;display:flex!important;align-items:center!important;}
+  .kasir-fullscreen .sumrow.total span:first-child{font-size:22px!important;font-weight:950!important;color:#0f172a!important;}
+  .kasir-fullscreen .sumrow.total #total{font-size:28px!important;font-weight:950!important;color:#135be8!important;line-height:1!important;}
+
+  .kasir-fullscreen #customer{order:11!important;height:52px!important;border-radius:16px!important;background:#fff!important;font-size:15px!important;}
+  .kasir-fullscreen #bayar{order:12!important;height:52px!important;border-radius:16px!important;font-size:16px!important;}
+  .kasir-fullscreen #metode{order:13!important;height:52px!important;border-radius:16px!important;font-weight:800!important;}
+  .kasir-fullscreen .pay-grid{order:14!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px!important;margin-top:2px!important;}
+  .kasir-fullscreen .pay-grid .btn{min-height:58px!important;border-radius:18px!important;font-size:15px!important;}
+  .kasir-fullscreen .pay-grid .btn.primary{height:64px!important;border-radius:18px!important;font-size:18px!important;font-weight:950!important;}
+
+  /* Popup search tetap di atas, tidak dorong keranjang */
+  body.search-open .product-popup{top:130px!important;bottom:12px!important;border-radius:20px!important;}
+  body.search-open .cart{pointer-events:none!important;}
+}
