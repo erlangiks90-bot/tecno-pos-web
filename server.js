@@ -356,6 +356,12 @@ app.get('/api/admin/products', auth, ensureRole(['admin','kasir']), (req,res)=>{
   const q = `%${req.query.q || ''}%`;
   res.json({ ok:true, data: all('SELECT * FROM products WHERE toko_id=? AND (nama LIKE ? OR barcode LIKE ? OR kategori LIKE ?) ORDER BY nama ASC', [req.user.toko_id,q,q,q]) });
 });
+
+// Alias untuk pencarian kasir/mobile. Ini memperbaiki error: Cannot GET /api/products
+app.get('/api/products', auth, ensureRole(['admin','kasir']), (req,res)=>{
+  const q = `%${req.query.q || ''}%`;
+  res.json({ ok:true, data: all('SELECT * FROM products WHERE toko_id=? AND (nama LIKE ? OR barcode LIKE ? OR kategori LIKE ?) ORDER BY nama ASC', [req.user.toko_id,q,q,q]) });
+});
 app.post('/api/admin/products', auth, ensureRole(['admin']), (req,res)=>{
   const toko=tokoFor(req.user); const lim=packageLimit(toko);
   const count=get('SELECT COUNT(*) c FROM products WHERE toko_id=?',[req.user.toko_id]).c;
