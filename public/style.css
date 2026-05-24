@@ -160,3 +160,10 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
   .cart-row{grid-template-columns:1fr!important;gap:6px!important;padding:9px!important;}
   .qty{justify-content:flex-end!important;}
 }
+
+
+/* FIX KLIK: jangan ada layer transparan menutup tombol */
+body:not(.search-open)::before{display:none!important;pointer-events:none!important;}
+.main,.content,.section,.pos-layout,.cart,.summary,.topbar,.hamb,.btn,button,input,select{pointer-events:auto!important;}
+@media(max-width:900px){.sidebar:not(.open){pointer-events:none!important}.sidebar.open{pointer-events:auto!important}}
+body.search-open:before{pointer-events:none!important;}
