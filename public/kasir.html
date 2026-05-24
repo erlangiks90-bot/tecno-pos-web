@@ -18,7 +18,7 @@ async function loadShift(){
       shiftPanelKasir.innerHTML=`<div class="notice warn"><b>Kas belum dibuka.</b> Isi uang awal supaya laporan tutup kas rapi. <button class="btn primary" onclick="openShiftModal()">Buka Kas</button></div>`;
     }else{
       let s=j.shift;
-      shiftPanelKasir.innerHTML=`<div class="shift-ok"><div><b>Shift Aktif</b><span>Kasir: ${s.kasir_nama} • Buka: ${new Date(s.buka_at).toLocaleString('id-ID')}</span></div><div><b>${rp(s.uang_sistem)}</b><span>Sistem • ${s.transaksi} trx</span></div><button class="btn warn" onclick="closeShiftModal()">Tutup Kas</button></div>`;
+      shiftPanelKasir.innerHTML=`<div class="shift-ok"><div><b>Shift Aktif</b><span>Kasir: ${s.kasir_nama} • Buka: ${formatDateID(s.buka_at)}</span></div><div><b>${rp(s.uang_sistem)}</b><span>Sistem • ${s.transaksi} trx</span></div><button class="btn warn" onclick="closeShiftModal()">Tutup Kas</button></div>`;
     }
   }catch(e){
     // Jangan tampilkan "Response error" mentah ke kasir. Tetap izinkan tombol Buka Kas.

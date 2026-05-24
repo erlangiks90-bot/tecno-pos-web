@@ -5,6 +5,10 @@ const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+function nowJakartaSQL(){
+  const d=new Date(Date.now()+7*60*60*1000);
+  return d.toISOString().slice(0,19).replace('T',' ');
+}
 const initSqlJs = require('sql.js');
 const DB_DIR = path.join(__dirname, 'database');
 const DB_FILE = path.join(DB_DIR, 'tecno_pos.db');
@@ -427,8 +431,8 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), (req,res)=>{
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
   const status=b.metode==='UTANG'?'UTANG':'LUNAS';
-  const info=run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'']);
+  const info=run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',nowJakartaSQL()]);
   const trxId=info.lastInsertRowid;
   const ins=db.prepare('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)');
   for (const it of items) {

@@ -1,6 +1,18 @@
 const API={user:JSON.parse(localStorage.getItem('tecno_user')||'null'),toko:JSON.parse(localStorage.getItem('tecno_toko')||'{}')};
 if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.href='/';
 const rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
+function parseAppDate(v){
+  if(!v) return new Date();
+  if(v instanceof Date) return v;
+  let s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) s=s.replace(' ','T')+'Z';
+  return new Date(s);
+}
+function formatDateID(v){
+  const d=parseAppDate(v);
+  if(isNaN(d.getTime())) return String(v||'-');
+  return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).replace(/\./g,':');
+}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
 async function api(url,opt={}){
   opt.headers=Object.assign({'Content-Type':'application/json','x-user-id':API.user?.id||''},opt.headers||{});
@@ -41,12 +53,53 @@ async function uploadFileInput(input, type='produk'){
   return j.url;
 }
 
-function setupShell(title, subtitle=''){qs('#pageTitle')&&(qs('#pageTitle').textContent=title);qs('#sideTitle')&&(qs('#sideTitle').textContent=title);qs('#sideSub')&&(qs('#sideSub').textContent=subtitle||API.user?.nama||'');qs('#hamb')&&(qs('#hamb').onclick=()=>qs('#sidebar').classList.toggle('open'));qsa('[data-nav]').forEach(b=>b.onclick=()=>showSection(b.dataset.nav));}
-function showSection(id){qsa('.section').forEach(s=>s.classList.remove('active'));qsa('[data-nav]').forEach(b=>b.classList.remove('active'));qs('#'+id)?.classList.add('active');qs(`[data-nav="${id}"]`)?.classList.add('active');qs('#pageTitle')&&(qs('#pageTitle').textContent=qs(`[data-nav="${id}"]`)?.textContent.trim()||'TECNO POS');qs('#sidebar')?.classList.remove('open')}
-function modal(html){let m=document.createElement('div');m.className='modal';if(String(html).includes('product-form'))m.classList.add('product-modal');m.innerHTML=`<div class="modal-card ${String(html).includes('product-form')?'product-sheet-card':''}">${html}</div>`;document.body.appendChild(m);return m}
+function setupShell(title, subtitle=''){
+  qs('#pageTitle')&&(qs('#pageTitle').textContent=title);
+  qs('#sideTitle')&&(qs('#sideTitle').textContent=title);
+  qs('#sideSub')&&(qs('#sideSub').textContent=subtitle||API.user?.nama||'');
+  qs('#hamb')&&(qs('#hamb').onclick=()=>qs('#sidebar').classList.toggle('open'));
+  qsa('[data-nav]').forEach(b=>b.onclick=()=>showSection(b.dataset.nav,true));
+  setupMobileBackGuard();
+}
+function showSection(id, push=false){
+  qsa('.section').forEach(s=>s.classList.remove('active'));
+  qsa('[data-nav]').forEach(b=>b.classList.remove('active'));
+  qs('#'+id)?.classList.add('active');
+  qs(`[data-nav="${id}"]`)?.classList.add('active');
+  qs('#pageTitle')&&(qs('#pageTitle').textContent=qs(`[data-nav="${id}"]`)?.textContent.trim()||'TECNO POS');
+  qs('#sidebar')?.classList.remove('open');
+  if(push && window.__backGuardReady){try{history.pushState({app:true,section:id},'',location.href)}catch(e){}}
+}
+function modal(html){
+  let m=document.createElement('div');m.className='modal';
+  if(String(html).includes('product-form'))m.classList.add('product-modal');
+  m.innerHTML=`<div class="modal-card ${String(html).includes('product-form')?'product-sheet-card':''}">${html}</div>`;
+  document.body.appendChild(m);
+  if(window.__backGuardReady){try{history.pushState({app:true,modal:true},'',location.href)}catch(e){}}
+  return m
+}
 function closeModal(){document.querySelector('.modal')?.remove()}
-function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${typeof c[1]==='function'?c[1](r):(r[c[1]]??'')}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
-function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No: ${tr.invoice}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${new Date(tr.created_at).toLocaleString('id-ID')}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
+function setupMobileBackGuard(){
+  if(window.__backGuardReady || !API.user) return;
+  window.__backGuardReady=true;
+  try{history.replaceState({app:true},'',location.href);history.pushState({app:true},'',location.href)}catch(e){}
+  window.addEventListener('popstate',()=>{
+    const modalEl=document.querySelector('.modal');
+    if(modalEl){modalEl.remove(); try{history.pushState({app:true},'',location.href)}catch(e){}; return;}
+    const extra=document.getElementById('extraModal');
+    if(extra && !extra.classList.contains('hidden')){extra.classList.add('hidden'); try{history.pushState({app:true},'',location.href)}catch(e){}; return;}
+    if(document.body.classList.contains('search-open') && typeof closeSearchPopup==='function'){closeSearchPopup(); try{history.pushState({app:true},'',location.href)}catch(e){}; return;}
+    const side=qs('#sidebar');
+    if(side?.classList.contains('open')){side.classList.remove('open'); try{history.pushState({app:true},'',location.href)}catch(e){}; return;}
+    const first=qsa('[data-nav]')[0]?.dataset.nav;
+    const active=qs('.section.active')?.id;
+    if(first && active && active!==first){showSection(first,false); try{history.pushState({app:true},'',location.href)}catch(e){}; return;}
+    toast('Gunakan tombol Logout untuk keluar akun');
+    try{history.pushState({app:true},'',location.href)}catch(e){}
+  });
+}
+function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>{let v=typeof c[1]==='function'?c[1](r):(r[c[1]]??''); if(typeof c[1]==='string' && /(_at|tanggal|created_at)$/i.test(c[1]) && v) v=formatDateID(v); return `<td>${v}</td>`}).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
+function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No: ${tr.invoice}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
 function escposText(toko,tr,items){
   const line='--------------------------------';
   const cut=(txt,w=32)=>String(txt||'').slice(0,w);
@@ -59,7 +112,7 @@ function escposText(toko,tr,items){
   out.push(line);
   out.push('No: '+tr.invoice);
   out.push('Kasir: '+(tr.kasir||API.user?.nama||'-'));
-  out.push(new Date(tr.created_at).toLocaleString('id-ID'));
+  out.push(formatDateID(tr.created_at));
   out.push(line);
   items.forEach(i=>{out.push(cut(i.nama));out.push(row(`${i.qty} x ${money(i.harga)}`,money(i.subtotal)));});
   out.push(line);
