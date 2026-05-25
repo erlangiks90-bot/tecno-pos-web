@@ -328,3 +328,129 @@ input,select,textarea{background:var(--card);color:var(--text);border-color:var(
 .lock-card input{width:100%;font-size:28px;letter-spacing:10px;text-align:center;padding:14px;margin:10px 0 12px;border-radius:16px;border:1px solid #cbd5e1;background:var(--input,#fff);color:var(--text,#111827)}
 .lock-icon{font-size:48px;margin-bottom:6px}.lock-card .btn{width:100%;margin-top:8px}.pro-session-actions{display:inline-flex;gap:8px;align-items:center;margin-left:10px;flex-wrap:wrap}.pro-session-actions .btn{padding:8px 10px;font-size:13px}
 @media(max-width:700px){.pro-session-actions{display:flex;margin:8px 0 0}.topbar{align-items:flex-start}.lock-card{padding:22px}.lock-card input{font-size:24px}}
+
+
+/* ===== FIX UI: mode terang penuh + hamburger tap luar tutup ===== */
+.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(2,6,23,.48);z-index:19;backdrop-filter:blur(2px)}
+body.sidebar-is-open .sidebar-backdrop{display:block}.sidebar{z-index:20}
+@media(min-width:761px){.sidebar-backdrop{display:none!important}}
+
+/* Paksa semua komponen mengikuti tema, bukan warna gelap hardcode */
+:root[data-theme="light"] body{background:#f8fafc!important;color:#0f172a!important}
+:root[data-theme="light"] .topbar,
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .table-wrap,
+:root[data-theme="light"] .prod-card,
+:root[data-theme="light"] .modal-card,
+:root[data-theme="light"] .login-card{background:#ffffff!important;color:#0f172a!important;border-color:#e2e8f0!important}
+:root[data-theme="light"] input,
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea{background:#ffffff!important;color:#0f172a!important;border-color:#cbd5e1!important}
+:root[data-theme="light"] .table{background:#ffffff!important;color:#0f172a!important}
+:root[data-theme="light"] .table th{background:#f1f5f9!important;color:#475569!important}
+:root[data-theme="light"] .table td{color:#0f172a!important;border-bottom-color:#e2e8f0!important}
+:root[data-theme="light"] .side-sub,
+:root[data-theme="light"] .stat-label{color:#64748b!important}
+:root[data-theme="light"] .stat-value,
+:root[data-theme="light"] .card h2,
+:root[data-theme="light"] .card h3{color:#0f172a!important}
+
+@media(max-width:760px){
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .app,
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .main{background:#f8fafc!important;color:#0f172a!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .topbar{background:#ffffff!important;color:#0f172a!important;border-bottom:1px solid #e2e8f0!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .hamb{background:#ffffff!important;color:#0f172a!important;border:1px solid #cbd5e1!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .card{background:#ffffff!important;color:#0f172a!important;border-color:#e2e8f0!important;box-shadow:0 8px 24px rgba(15,23,42,.06)!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .card h2,
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .card h3{color:#0f172a!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .stat-value{color:#0f172a!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) input,
+  :root[data-theme="light"] body:not(.kasir-fullscreen) select,
+  :root[data-theme="light"] body:not(.kasir-fullscreen) textarea{background:#ffffff!important;color:#0f172a!important;border-color:#cbd5e1!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .table-wrap{background:#ffffff!important;border-color:#e2e8f0!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .table{background:#ffffff!important;color:#0f172a!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .table th{background:#f1f5f9!important;color:#475569!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .table td{color:#0f172a!important;border-bottom:1px solid #e2e8f0!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .modal-card{background:#ffffff!important;color:#0f172a!important;border-color:#e2e8f0!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .sidebar{background:#ffffff!important;color:#0f172a!important;border-right:1px solid #e2e8f0!important;box-shadow:22px 0 70px rgba(15,23,42,.22)!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .nav button{color:#334155!important}
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .nav button.active,
+  :root[data-theme="light"] body:not(.kasir-fullscreen) .nav button:hover{background:#e0ecff!important;color:#0f3fb5!important}
+}
+
+/* ===== FIX KHUSUS KASIR: hamburger menu tampil penuh dan tidak ketutup ===== */
+@media(max-width:760px){
+  body.kasir-fullscreen.sidebar-is-open{overflow:hidden!important;}
+  body.kasir-fullscreen .sidebar-backdrop{z-index:998!important;background:rgba(2,6,23,.48)!important;}
+  body.kasir-fullscreen .sidebar{
+    display:flex!important;
+    position:fixed!important;
+    left:0!important;
+    top:0!important;
+    bottom:0!important;
+    right:auto!important;
+    width:86vw!important;
+    max-width:330px!important;
+    height:100svh!important;
+    padding:16px!important;
+    z-index:999!important;
+    transform:translateX(-110%)!important;
+    transition:transform .22s ease!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    align-items:stretch!important;
+    background:#0b1220!important;
+    box-shadow:22px 0 70px rgba(0,0,0,.45)!important;
+  }
+  body.kasir-fullscreen .sidebar.open{transform:translateX(0)!important;}
+  body.kasir-fullscreen .side-brand{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    gap:12px!important;
+    width:100%!important;
+    padding:10px 6px 18px!important;
+    min-height:70px!important;
+  }
+  body.kasir-fullscreen .side-brand>div:nth-child(2){display:block!important;min-width:0!important;}
+  body.kasir-fullscreen .side-title{display:block!important;font-size:16px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;color:#fff!important;}
+  body.kasir-fullscreen .side-sub{display:block!important;color:#94a3b8!important;}
+  body.kasir-fullscreen .logo-box{width:46px!important;height:46px!important;min-width:46px!important;}
+  body.kasir-fullscreen .nav{
+    display:grid!important;
+    gap:8px!important;
+    width:100%!important;
+    padding:14px 0!important;
+  }
+  body.kasir-fullscreen .nav button{
+    display:flex!important;
+    justify-content:flex-start!important;
+    align-items:center!important;
+    width:100%!important;
+    min-height:48px!important;
+    padding:13px 14px!important;
+    font-size:15px!important;
+    text-align:left!important;
+    color:#cbd5e1!important;
+    background:transparent!important;
+    border-radius:14px!important;
+  }
+  body.kasir-fullscreen .nav button.active,
+  body.kasir-fullscreen .nav button:hover{background:rgba(37,99,235,.24)!important;color:#fff!important;}
+  body.kasir-fullscreen .nav button::after{content:none!important;}
+  body.kasir-fullscreen .side-bottom{display:block!important;width:100%!important;margin-top:auto!important;padding-top:14px!important;}
+  body.kasir-fullscreen .topbar{z-index:120!important;}
+  body.kasir-fullscreen .hamb{display:grid!important;place-items:center!important;width:44px!important;height:44px!important;min-width:44px!important;font-size:22px!important;z-index:121!important;}
+
+  :root[data-theme="light"] body.kasir-fullscreen .sidebar{
+    background:#ffffff!important;
+    color:#0f172a!important;
+    border-right:1px solid #e2e8f0!important;
+    box-shadow:22px 0 70px rgba(15,23,42,.22)!important;
+  }
+  :root[data-theme="light"] body.kasir-fullscreen .side-title{color:#0f172a!important;}
+  :root[data-theme="light"] body.kasir-fullscreen .side-sub{color:#64748b!important;}
+  :root[data-theme="light"] body.kasir-fullscreen .nav button{color:#334155!important;background:transparent!important;}
+  :root[data-theme="light"] body.kasir-fullscreen .nav button.active,
+  :root[data-theme="light"] body.kasir-fullscreen .nav button:hover{background:#e0ecff!important;color:#0f3fb5!important;}
+}
