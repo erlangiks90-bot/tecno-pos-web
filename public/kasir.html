@@ -38,9 +38,11 @@ async function loadProducts(showPopup=false){
   try{
     let j=await api('/api/admin/products?q='+encodeURIComponent(q));
     PRODUCTS=Array.isArray(j.data)?j.data:[];
+    saveProductCache(PRODUCTS);
   }catch(e){
-    PRODUCTS=[];
-    toast('Gagal memuat barang');
+    PRODUCTS=localProductSearch(q);
+    if(PRODUCTS.length) toast('MODE OFFLINE: barang diambil dari cache lokal');
+    else toast('Barang offline belum ada di cache. Buka produk sekali saat online dulu.');
   }
   renderProducts();
   if(showPopup || window.innerWidth<=900) openSearchPopup();

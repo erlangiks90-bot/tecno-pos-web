@@ -215,7 +215,72 @@ function modal(html){
   if(window.__backGuardReady){try{history.pushState({app:true,modal:true},'',location.href)}catch(e){}}
   return m
 }
-function closeModal(){document.querySelector('.modal')?.remove()}
+function closeModal(){try{window.__scannerStop?.()}catch(e){} document.querySelector('.modal')?.remove()}
+
+// ===== HYBRID PRODUCT CACHE + CAMERA BARCODE SCANNER =====
+const PRODUCT_CACHE_KEY='tecno_product_cache_v2';
+function productCache(){try{return JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY)||'[]')}catch(e){return []}}
+function saveProductCache(rows=[]){
+  try{
+    const map=new Map(productCache().map(p=>[String(p.id||p.barcode||p.nama),p]));
+    (rows||[]).forEach(p=>{ if(p) map.set(String(p.id||p.barcode||p.nama),p); });
+    localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(Array.from(map.values()).slice(0,5000)));
+  }catch(e){}
+}
+function localProductSearch(q){
+  q=String(q||'').trim().toLowerCase();
+  if(!q) return [];
+  return productCache().filter(p=>
+    String(p.nama||'').toLowerCase().includes(q) ||
+    String(p.barcode||'').toLowerCase()===q ||
+    String(p.barcode||'').toLowerCase().includes(q) ||
+    String(p.kategori||'').toLowerCase().includes(q)
+  ).slice(0,80);
+}
+async function openCameraScanner(targetSelector){
+  const target = targetSelector ? document.querySelector(targetSelector) : (document.activeElement?.matches?.('input') ? document.activeElement : document.getElementById('search'));
+  if(!navigator.mediaDevices?.getUserMedia){alert('Kamera browser belum didukung. Ketik barcode manual.');return;}
+  let stream=null, stopped=false, detector=null;
+  try{
+    if('BarcodeDetector' in window){detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e']});}
+  }catch(e){}
+  modal(`<div class="modal-head"><b>Scan Barcode Kamera</b><button class="x" onclick="closeScannerModal()">X</button></div><div class="scanner-box"><video id="scanVideo" playsinline autoplay></video><div class="scan-line"></div></div><p class="side-sub">Arahkan kamera HP ke barcode. Jika tidak terbaca, isi kode manual.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik kode barcode manual"><button class="btn primary" onclick="applyManualBarcode('${target?.id||''}')">Pakai</button></div>`);
+    window.__scannerStop=()=>{stopped=true; try{stream?.getTracks()?.forEach(t=>t.stop())}catch(e){}};
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+    const video=document.getElementById('scanVideo'); video.srcObject=stream; await video.play();
+    if(!detector){toast('Scanner otomatis tidak didukung browser ini, pakai input manual.');return;}
+    const tick=async()=>{
+      if(stopped || !document.getElementById('scanVideo')) return;
+      try{
+        const codes=await detector.detect(video);
+        if(codes && codes.length){
+          const val=codes[0].rawValue||'';
+          if(val){ applyScannedBarcode(val,target); return; }
+        }
+      }catch(e){}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(err){
+    alert('Kamera tidak bisa dibuka. Izinkan permission kamera di browser, atau ketik barcode manual.');
+    try{stream?.getTracks()?.forEach(t=>t.stop())}catch(e){}
+  }
+}
+function applyScannedBarcode(val,target){
+  try{window.__scannerStop?.()}catch(e){}
+  const el=target || document.getElementById('search');
+  if(el){el.value=val; el.dispatchEvent(new Event('input',{bubbles:true}));}
+  closeModal();
+  toast('Barcode terbaca: '+val);
+  if(el?.id==='search' && typeof scanOrSearch==='function') scanOrSearch();
+}
+function closeScannerModal(){try{window.__scannerStop?.()}catch(e){} closeModal();}
+function applyManualBarcode(targetId){
+  const val=document.getElementById('manualBarcode')?.value?.trim();
+  if(!val) return alert('Isi kode dulu');
+  applyScannedBarcode(val, targetId?document.getElementById(targetId):document.getElementById('search'));
+}
+
 function setupMobileBackGuard(){
   if(window.__backGuardReady || !API.user) return;
   window.__backGuardReady=true;

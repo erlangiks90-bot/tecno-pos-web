@@ -454,3 +454,11 @@ body.sidebar-is-open .sidebar-backdrop{display:block}.sidebar{z-index:20}
   :root[data-theme="light"] body.kasir-fullscreen .nav button.active,
   :root[data-theme="light"] body.kasir-fullscreen .nav button:hover{background:#e0ecff!important;color:#0f3fb5!important;}
 }
+
+
+/* Scanner barcode kamera HP */
+.scanner-box{position:relative;border-radius:18px;overflow:hidden;background:#000;min-height:260px;display:grid;place-items:center}
+.scanner-box video{width:100%;max-height:420px;object-fit:cover;background:#000}
+.scan-line{position:absolute;left:8%;right:8%;top:50%;height:3px;background:rgba(255,255,255,.9);box-shadow:0 0 18px rgba(255,255,255,.8)}
+.barcode-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+@media(max-width:700px){.barcode-row{grid-template-columns:1fr}.scanner-box{min-height:220px}}
