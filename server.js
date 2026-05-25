@@ -105,7 +105,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const PACKAGE_LIMITS = {
-  GRATIS: { kasir: 1, produk: 100, qris: 0, hutang: 1, barcode: 1, laporan: 1, thermal: 1, multi_device: 0 },
+  GRATIS: { kasir: 10, produk: 1000, qris: 1, hutang: 1, barcode: 1, laporan: 1, thermal: 1, multi_device: 1 },
   BASIC: { kasir: 3, produk: 999999, qris: 1, hutang: 1, barcode: 1, laporan: 1, thermal: 1, multi_device: 1 },
   PRO: { kasir: 10, produk: 999999, qris: 1, hutang: 1, barcode: 1, laporan: 1, thermal: 1, multi_device: 1 },
   ENTERPRISE: { kasir: 999999, produk: 999999, qris: 1, hutang: 1, barcode: 1, laporan: 1, thermal: 1, multi_device: 1 }
@@ -387,20 +387,37 @@ app.post('/api/admin/kasir', auth, ensureRole(['admin']), async (req,res)=>{
   const count=(await get("SELECT COUNT(*)::int c FROM users WHERE toko_id=? AND role='kasir'",[req.user.toko_id])).c;
   if (count >= lim.kasir) return res.status(403).json({ ok:false, message:`Paket ${toko.paket} hanya mendukung ${lim.kasir} kasir. Upgrade paket di developer.` });
   const b=req.body;
-  await run('INSERT INTO users (toko_id,nama,username,password,role,status) VALUES (?,?,?,?,?,?)', [req.user.toko_id,b.nama,b.username,b.password||'123456','kasir',b.status||'AKTIF']);
-  await log(req.user,'TAMBAH KASIR',b.username);
-  res.json({ ok:true });
+  const nama = String(b.nama || '').trim();
+  const username = String(b.username || '').trim();
+  const password = String(b.password || '123456').trim();
+  const pin = String(b.pin || password || '123456').trim().slice(0,6);
+  if(!nama || !username) return res.status(400).json({ok:false,message:'Nama dan username kasir wajib diisi'});
+  const exists = await get('SELECT id FROM users WHERE username=?', [username]);
+  if(exists) return res.status(400).json({ok:false,message:'Username kasir sudah dipakai. Gunakan username lain.'});
+  await run('INSERT INTO users (toko_id,nama,username,password,pin,role,status) VALUES (?,?,?,?,?,?,?)', [req.user.toko_id,nama,username,password,pin,'kasir',b.status||'AKTIF']);
+  await log(req.user,'TAMBAH KASIR',username);
+  res.json({ ok:true, message:'Kasir berhasil ditambahkan', pin });
 });
 app.put('/api/admin/kasir/:id', auth, ensureRole(['admin']), async (req,res)=>{
   const b=req.body;
-  await run('UPDATE users SET nama=?,username=?,password=COALESCE(NULLIF(?,""),password),status=? WHERE id=? AND toko_id=? AND role="kasir"', [b.nama,b.username,b.password||'',b.status||'AKTIF',req.params.id,req.user.toko_id]);
-  res.json({ok:true});
+  const nama = String(b.nama || '').trim();
+  const username = String(b.username || '').trim();
+  const password = String(b.password || '').trim();
+  if(!nama || !username) return res.status(400).json({ok:false,message:'Nama dan username kasir wajib diisi'});
+  const other = await get('SELECT id FROM users WHERE username=? AND id<>?', [username, req.params.id]);
+  if(other) return res.status(400).json({ok:false,message:'Username kasir sudah dipakai. Gunakan username lain.'});
+  if(password){
+    await run("UPDATE users SET nama=?,username=?,password=?,pin=?,status=? WHERE id=? AND toko_id=? AND role='kasir'", [nama,username,password,password.slice(0,6),b.status||'AKTIF',req.params.id,req.user.toko_id]);
+  } else {
+    await run("UPDATE users SET nama=?,username=?,status=? WHERE id=? AND toko_id=? AND role='kasir'", [nama,username,b.status||'AKTIF',req.params.id,req.user.toko_id]);
+  }
+  res.json({ok:true,message:'Kasir berhasil diperbarui'});
 });
 
 app.post('/api/admin/kasir/:id/reset-password', auth, ensureRole(['admin']), async (req,res)=>{
   const password = String(req.body.password || '').trim();
   if(password.length < 6) return res.status(400).json({ok:false,message:'Password minimal 6 karakter'});
-  const info = await run('UPDATE users SET password=? WHERE id=? AND toko_id=? AND role="kasir"', [password, req.params.id, req.user.toko_id]);
+  const info = await run("UPDATE users SET password=?, pin=? WHERE id=? AND toko_id=? AND role='kasir'", [password, password.slice(0,6), req.params.id, req.user.toko_id]);
   if(!info.changes) return res.status(404).json({ok:false,message:'Kasir tidak ditemukan'});
   await log(req.user,'RESET PASSWORD KASIR',String(req.params.id));
   res.json({ok:true});
