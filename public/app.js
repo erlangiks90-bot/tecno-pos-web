@@ -1,6 +1,4 @@
 const API={user:JSON.parse(localStorage.getItem('tecno_user')||'null'),toko:JSON.parse(localStorage.getItem('tecno_toko')||'{}')};
-const TECNO_API_BASE=(window.TECNO_API_BASE||localStorage.getItem('TECNO_API_BASE')||'').replace(/\/$/,'');
-function apiUrl(path){return TECNO_API_BASE && String(path).startsWith('/api') ? TECNO_API_BASE+path : path;}
 if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.replace('/');
 const rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 function parseAppDate(v){
@@ -22,8 +20,11 @@ function formatDateID(v){
 function prefKey(name){return API.user?.id?`tecno_${name}_${API.user.id}`:`tecno_${name}`;}
 function getUserTheme(){return localStorage.getItem(prefKey('theme'))||localStorage.getItem('tecno_theme')||API.user?.mode_tema||API.toko?.mode_tema||'eye';}
 function getUserAccent(){return localStorage.getItem(prefKey('accent'))||localStorage.getItem('tecno_accent')||API.user?.warna_tema||API.toko?.warna_tema||'blue';}
+function activeStoreId(){return API.user?.toko_id || API.toko?.id || 'global';}
+function storeKey(name){return `tecno_store_${activeStoreId()}_${name}`;}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
-const HYBRID_QUEUE_KEY='tecno_offline_checkout_queue_v1';
+// MULTI TOKO FIX: semua cache offline dipisah per toko supaya produk toko A tidak muncul di kasir toko B.
+const HYBRID_QUEUE_KEY=storeKey('offline_checkout_queue_v2');
 function trxDateCode(){
   const d=new Date();
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
@@ -31,7 +32,7 @@ function trxDateCode(){
 }
 function makeLocalInvoice(){
   const day=trxDateCode();
-  const key='tecno_local_trx_seq_'+day;
+  const key=storeKey('local_trx_seq_'+day);
   const next=(Number(localStorage.getItem(key)||'0')||0)+1;
   localStorage.setItem(key,String(next));
   return `TRX-${day}-${String(next).padStart(6,'0')}`;
@@ -52,7 +53,7 @@ function numClean(v){
   const n=Number(s);
   return Number.isFinite(n)?n:0;
 }
-function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]')}catch(e){return []}}
+function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]').filter(x=>!x.toko_id || String(x.toko_id)===String(activeStoreId()))}catch(e){return []}}
 function saveHybridQueue(q){localStorage.setItem(HYBRID_QUEUE_KEY,JSON.stringify(q));updateHybridBadge()}
 function makeOfflineReceipt(body){
   const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
@@ -67,7 +68,7 @@ async function api(url,opt={}){
   const originalBody=opt.body;
   if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);
   try{
-    const r=await fetch(apiUrl(url),opt);
+    const r=await fetch(url,opt);
     const text=await r.text();
     let j={};
     try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
@@ -79,7 +80,7 @@ async function api(url,opt={}){
       const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
       ensureInvoice(body);
       const q=hybridQueue();
-      q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
+      q.push({url,method:'POST',body,user_id:API.user?.id||'',toko_id:activeStoreId(),created_at:new Date().toISOString(),status:'pending'});
       saveHybridQueue(q);
       toast('MODE OFFLINE: transaksi tersimpan, nanti auto-sync');
       return makeOfflineReceipt(body);
@@ -92,11 +93,11 @@ function enqueueCheckout(body){
   ensureInvoice(body);
   const q=hybridQueue();
   const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
-  if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
+  if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',toko_id:activeStoreId(),created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
   return body.offline_client_id;
 }
 function syncOneCheckout(body){
-  return fetch(apiUrl('/api/kasir/checkout'),{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
+  return fetch('/api/kasir/checkout',{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
     .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
     .then(()=>syncOfflineQueue()).catch(()=>{});
 }
@@ -110,7 +111,7 @@ async function syncOfflineQueue(){
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
+      const r=await fetch(item.url,{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
       if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
     }catch(e){}
@@ -262,12 +263,12 @@ function modal(html){
 function closeModal(){try{window.__scannerStop?.()}catch(e){} document.querySelector('.modal')?.remove()}
 
 // ===== HYBRID PRODUCT CACHE + CAMERA BARCODE SCANNER =====
-const PRODUCT_CACHE_KEY='tecno_product_cache_v2';
-function productCache(){try{return JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY)||'[]')}catch(e){return []}}
+const PRODUCT_CACHE_KEY=storeKey('product_cache_v3');
+function productCache(){try{return JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY)||'[]').filter(p=>!p.toko_id || String(p.toko_id)===String(activeStoreId()))}catch(e){return []}}
 function saveProductCache(rows=[]){
   try{
     const map=new Map(productCache().map(p=>[String(p.id||p.barcode||p.nama),p]));
-    (rows||[]).forEach(p=>{ if(p) map.set(String(p.id||p.barcode||p.nama),p); });
+    (rows||[]).forEach(p=>{ if(p){ if(!p.toko_id) p.toko_id=activeStoreId(); map.set(String(p.id||p.barcode||p.nama),p); } });
     localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(Array.from(map.values()).slice(0,5000)));
   }catch(e){}
 }
@@ -283,7 +284,7 @@ function localProductSearch(q){
 }
 
 // ===== LOCAL-FIRST SALES, STOCK, AND SYNC REPORT =====
-const LOCAL_SALES_KEY='tecno_local_sales_v1';
+const LOCAL_SALES_KEY=storeKey('local_sales_v2');
 function localSales(){try{return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY)||'[]')}catch(e){return []}}
 function saveLocalSales(rows){try{localStorage.setItem(LOCAL_SALES_KEY,JSON.stringify((rows||[]).slice(-1000)))}catch(e){}}
 function rememberLocalSale(receipt){
@@ -309,6 +310,7 @@ function adjustLocalProductStock(items=[]){
       const p=rows.find(x=>String(x.id)===String(it.id||it.product_id) || (it.barcode && String(x.barcode)===String(it.barcode)));
       if(p && p.stok!==undefined){p.stok=Math.max(0,Number(p.stok||0)-Number(it.qty||0));}
     });
+    rows.forEach(p=>{if(p && !p.toko_id)p.toko_id=activeStoreId();});
     localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(rows));
   }catch(e){}
 }
