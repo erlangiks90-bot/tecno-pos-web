@@ -28,7 +28,8 @@ function makeOfflineReceipt(body){
   const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
   const diskon=Number(body.diskon||0), pajak=Number(body.pajak||0), biaya=Number(body.biaya||0);
   const total=subtotal-diskon+pajak+biaya, bayar=Number(body.bayar||0), kembali=Math.max(0,bayar-total);
-  const id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+  const id=body.offline_client_id || ('OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999));
+  body.offline_client_id=id;
   const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
   return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'}};
 }
@@ -57,6 +58,20 @@ async function api(url,opt={}){
     throw err;
   }
 }
+
+function enqueueCheckout(body){
+  if(!body.offline_client_id) body.offline_client_id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+  const q=hybridQueue();
+  const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
+  if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
+  return body.offline_client_id;
+}
+function syncOneCheckout(body){
+  return fetch('/api/kasir/checkout',{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
+    .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
+    .then(()=>syncOfflineQueue()).catch(()=>{});
+}
+
 async function syncOfflineQueue(){
   if(!API.user) return;
   let q=hybridQueue();
@@ -68,7 +83,7 @@ async function syncOfflineQueue(){
     try{
       const r=await fetch(item.url,{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
-      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();changed=true;}
+      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
     }catch(e){}
   }
   const before=q.length;
@@ -237,6 +252,50 @@ function localProductSearch(q){
     String(p.kategori||'').toLowerCase().includes(q)
   ).slice(0,80);
 }
+
+// ===== LOCAL-FIRST SALES, STOCK, AND SYNC REPORT =====
+const LOCAL_SALES_KEY='tecno_local_sales_v1';
+function localSales(){try{return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY)||'[]')}catch(e){return []}}
+function saveLocalSales(rows){try{localStorage.setItem(LOCAL_SALES_KEY,JSON.stringify((rows||[]).slice(-1000)))}catch(e){}}
+function rememberLocalSale(receipt){
+  try{
+    const rows=localSales();
+    const tr=receipt.transaction||receipt.tr||{};
+    if(!rows.some(x=>x.offline_client_id===tr.offline_client_id || x.invoice===tr.invoice)){
+      rows.push({invoice:tr.invoice,offline_client_id:tr.offline_client_id,created_at:tr.created_at,customer:tr.customer,metode:tr.metode,total:tr.total,status_sync:'PENDING',items:receipt.items||[]});
+      saveLocalSales(rows);
+    }
+  }catch(e){}
+}
+function markLocalSaleSynced(offlineId){
+  if(!offlineId) return;
+  const rows=localSales(); let changed=false;
+  rows.forEach(x=>{if(x.offline_client_id===offlineId){x.status_sync='SYNCED';x.synced_at=new Date().toISOString();changed=true;}});
+  if(changed) saveLocalSales(rows);
+}
+function adjustLocalProductStock(items=[]){
+  try{
+    const rows=productCache();
+    (items||[]).forEach(it=>{
+      const p=rows.find(x=>String(x.id)===String(it.id||it.product_id) || (it.barcode && String(x.barcode)===String(it.barcode)));
+      if(p && p.stok!==undefined){p.stok=Math.max(0,Number(p.stok||0)-Number(it.qty||0));}
+    });
+    localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(rows));
+  }catch(e){}
+}
+function pendingSyncCount(){return hybridQueue().filter(x=>x.status!=='synced').length;}
+function renderSyncReport(targetId='syncReportTable'){
+  const el=document.getElementById(targetId); if(!el) return;
+  const q=hybridQueue().filter(x=>x.status!=='synced');
+  const sales=localSales().slice().reverse().slice(0,30);
+  let html=`<div class="card"><h3>Status Sync</h3><p><b>${navigator.onLine?'ONLINE':'OFFLINE'}</b> • Pending upload: <b>${q.length}</b></p><button class="btn primary" onclick="syncOfflineQueue();setTimeout(()=>renderSyncReport('${targetId}'),800)">Sync Sekarang</button></div>`;
+  html += '<h3>Transaksi Lokal Terakhir</h3>';
+  html += '<div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Tanggal</th><th>Customer</th><th>Metode</th><th>Total</th><th>Status</th></tr></thead><tbody>';
+  html += (sales.map(r=>`<tr><td>${r.invoice||'-'}</td><td>${r.created_at||'-'}</td><td>${r.customer||'-'}</td><td>${r.metode||'-'}</td><td>${rp(r.total||0)}</td><td><span class="badge ${r.status_sync==='SYNCED'?'ok':'warn'}">${r.status_sync||'PENDING'}</span></td></tr>`).join('') || '<tr><td colspan="6">Belum ada transaksi lokal</td></tr>');
+  html += '</tbody></table></div>';
+  el.innerHTML=html;
+}
+
 async function openCameraScanner(targetSelector){
   const target = targetSelector ? document.querySelector(targetSelector) : (document.activeElement?.matches?.('input') ? document.activeElement : document.getElementById('search'));
   if(!navigator.mediaDevices?.getUserMedia){alert('Kamera browser belum didukung. Ketik barcode manual.');return;}

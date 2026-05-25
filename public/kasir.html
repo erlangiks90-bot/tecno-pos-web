@@ -1,6 +1,7 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kasir - TECNO POS</title><link rel="stylesheet" href="/style.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#0f172a"></head><body class="kasir-fullscreen"><div class="app"><aside id="sidebar" class="sidebar"><div class="side-brand"><div class="logo-box" id="logoBox">TK</div><div><div id="sideTitle" class="side-title">NAMA TOKO</div><div id="sideSub" class="side-sub">Kasir Toko</div></div></div><div class="nav"><button class="active" data-nav="kasirPage">Kasir</button><button data-nav="riwayat">Riwayat</button><button data-nav="tampilan">Tampilan</button><button data-nav="memberKasir">Member</button><button data-nav="absensi">Absensi</button><button data-nav="asisten">Asisten AI</button><button data-nav="profil">Profil</button></div><div class="side-bottom"><button class="btn danger" onclick="logout()" style="width:100%">Logout</button></div></aside><main class="main"><header class="topbar"><button id="hamb" class="hamb">☰</button><div class="page-title" id="pageTitle">Kasir</div><div><b id="topStore"></b></div></header><div class="content">
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kasir - TECNO POS</title><link rel="stylesheet" href="/style.css"><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#0f172a"></head><body class="kasir-fullscreen"><div class="app"><aside id="sidebar" class="sidebar"><div class="side-brand"><div class="logo-box" id="logoBox">TK</div><div><div id="sideTitle" class="side-title">NAMA TOKO</div><div id="sideSub" class="side-sub">Kasir Toko</div></div></div><div class="nav"><button class="active" data-nav="kasirPage">Kasir</button><button data-nav="riwayat">Riwayat</button><button data-nav="syncStatus">Sync</button><button data-nav="tampilan">Tampilan</button><button data-nav="memberKasir">Member</button><button data-nav="absensi">Absensi</button><button data-nav="asisten">Asisten AI</button><button data-nav="profil">Profil</button></div><div class="side-bottom"><button class="btn danger" onclick="logout()" style="width:100%">Logout</button></div></aside><main class="main"><header class="topbar"><button id="hamb" class="hamb">☰</button><div class="page-title" id="pageTitle">Kasir</div><div><b id="topStore"></b></div></header><div class="content">
 <section id="kasirPage" class="section active"><div id="shiftPanelKasir" class="shift-panel"></div><div class="shortcut-hint">Shortcut: <b>F1</b> cari produk • <b>F2</b> bayar • <b>F3</b> simpan keranjang • <b>F4</b> riwayat • <b>Esc</b> kosongkan pencarian</div><div class="pos-layout"><div class="pos-search-panel"><div class="searchbar pos-searchbar"><input id="search" placeholder="Cari / scan barcode barang..." autofocus><button class="btn primary" onclick="loadProducts(true)">Cari</button><button class="btn" onclick="openCameraScanner()">Scan</button></div><div id="productGrid" class="product-grid product-popup"></div></div><div class="card cart"><h3>Keranjang</h3><select id="memberSelect"><option value="0">Pelanggan umum</option></select><div id="cartItems" class="cart-items"></div><div class="summary"><div class="sumrow"><span>Subtotal</span><b id="subtotal">Rp 0</b></div><div class="pos-extra-actions"><button class="btn" type="button" onclick="openExtraModal('voucherBox')">Voucher</button><button class="btn" type="button" onclick="openExtraModal('diskonBox')">Diskon</button><button class="btn" type="button" onclick="openExtraModal('pajakBox')">Pajak</button><button class="btn" type="button" onclick="openExtraModal('biayaBox')">Biaya</button></div><div class="extra-values"><span id="voucherInfo">Voucher: -</span><span id="diskonInfo">Diskon: Rp 0</span><span id="pajakInfo">Pajak: Rp 0</span><span id="biayaInfo">Biaya: Rp 0</span></div><select id="voucher" class="hidden-extra-control"><option value="">Tanpa voucher</option></select><input id="diskon" class="hidden-extra-control" type="number" value="0"><input id="pajak" class="hidden-extra-control" type="number" value="0"><input id="biaya" class="hidden-extra-control" type="number" value="0"><div class="sumrow total"><span>TOTAL</span><span id="total">Rp 0</span></div><input id="customer" placeholder="Nama pelanggan / umum"><input id="bayar" type="number" placeholder="Nominal bayar"><select id="metode"><option>TUNAI</option><option>QRIS</option><option>TRANSFER</option><option>UTANG</option></select><div class="pay-grid"><button class="btn warn" onclick="holdCart()">Simpan Keranjang</button><button class="btn" onclick="clearCart()">Kosongkan</button><button class="btn primary" style="grid-column:1/-1" onclick="checkout()">BAYAR & CETAK</button></div></div></div></div></section>
 <section id="riwayat" class="section"><div class="toolbar"><button class="btn" onclick="loadTransactions()">Refresh</button></div><div id="historyTable"></div><h3>Hold Keranjang</h3><div id="holdTable"></div></section>
+<section id="syncStatus" class="section"><div class="toolbar"><button class="btn primary" onclick="renderSyncReport()">Refresh Status Sync</button></div><div id="syncReportTable"></div></section>
 <section id="memberKasir" class="section"><div class="card"><h3>Member Pelanggan</h3><p>Kasir bisa memilih member saat transaksi. Tambah/edit member dilakukan admin toko.</p><div id="memberTable"></div></div></section>
 <section id="absensi" class="section"><div class="card"><h3>Absensi Kasir</h3><p>Gunakan saat mulai dan selesai bekerja.</p><button class="btn ok" onclick="absenMasuk()">Absen Masuk</button> <button class="btn danger" onclick="absenPulang()">Absen Pulang</button><p id="absenInfo"></p></div></section>
 <section id="asisten" class="section"><div class="card"><h3>TECNO AI</h3><p id="aiText">Klik tombol untuk melihat ringkasan toko.</p><button class="btn primary" onclick="loadAI()">Tanya AI</button><div class="searchbar" style="margin-top:14px"><input id="aiInput" placeholder="Contoh: hitung kembalian 100000"><button class="btn" onclick="askLocalAI()">Kirim</button></div><p id="aiAnswer"></p></div></section>
@@ -32,20 +33,33 @@ function clientTimeJakartaSQL(){const d=new Date();const parts=new Intl.DateTime
 function bindShortcuts(){document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!['F1','F2','F3','F4','Escape'].includes(e.key))return; if(e.key==='F1'){e.preventDefault();showSection('kasirPage');search.focus()} if(e.key==='F2'){e.preventDefault();checkout()} if(e.key==='F3'){e.preventDefault();holdCart()} if(e.key==='F4'){e.preventDefault();showSection('riwayat');loadTransactions()} if(e.key==='Escape'){if(document.querySelector('.modal'))closeModal(); else search.value='';}})}
 
 function storeBrand(){const t=API.toko||{};sideTitle.textContent=t.nama_toko||'NAMA TOKO';topStore.textContent=t.nama_toko||'';profName.textContent=API.user.nama+' - '+(t.nama_toko||'');if(t.logo){logoBox.innerHTML=`<img src="${t.logo}">`}else{logoBox.textContent=(t.nama_toko||'TK').slice(0,2).toUpperCase()}}
+async function syncProductCache(){
+  try{
+    let j=await api('/api/admin/products');
+    if(Array.isArray(j.data) && j.data.length) saveProductCache(j.data);
+  }catch(e){}
+}
 async function loadProducts(showPopup=false){
   let q=(search.value||'').trim();
   if(!q){PRODUCTS=[];renderProducts();closeSearchPopup();return;}
-  try{
-    let j=await api('/api/admin/products?q='+encodeURIComponent(q));
-    PRODUCTS=Array.isArray(j.data)?j.data:[];
-    saveProductCache(PRODUCTS);
-  }catch(e){
-    PRODUCTS=localProductSearch(q);
-    if(PRODUCTS.length) toast('MODE OFFLINE: barang diambil dari cache lokal');
-    else toast('Barang offline belum ada di cache. Buka produk sekali saat online dulu.');
-  }
+  // POS cepat: tampilkan hasil dari cache lokal dulu, jangan tunggu Railway/Supabase.
+  PRODUCTS=localProductSearch(q);
   renderProducts();
   if(showPopup || window.innerWidth<=900) openSearchPopup();
+  // Server hanya refresh cache di belakang.
+  try{
+    let j=await api('/api/admin/products?q='+encodeURIComponent(q));
+    const remote=Array.isArray(j.data)?j.data:[];
+    if(remote.length){
+      PRODUCTS=remote;
+      const merged=[...productCache().filter(p=>!remote.some(r=>String(r.id)===String(p.id))),...remote];
+      saveProductCache(merged);
+      renderProducts();
+    }
+  }catch(e){
+    if(PRODUCTS.length) toast('Barang diambil dari cache lokal');
+    else toast('Barang belum ada di cache. Buka produk sekali saat online dulu.');
+  }
 }
 function renderProducts(){
   const rows=PRODUCTS.map(p=>`<div class="prod-card search-result-item" data-id="${p.id}"><h4>${p.nama}</h4><div class="side-sub">${p.barcode||'-'} • ${p.kategori||'Umum'} • Rak ${p.rak||'-'}</div><div>Stok: <b>${p.stok}</b> ${p.satuan||'PCS'}</div><div class="price">${rp(p.harga_jual)}</div><button type="button" class="btn primary add-product-btn" data-id="${p.id}" style="width:100%;margin-top:10px">Tambah</button></div>`).join('');
@@ -64,13 +78,29 @@ async function scanOrSearch(){
 }
 function priceOf(c){return Number(memberSelect.value)>0 && c.harga_member>0 ? Number(c.harga_member) : Number(c.harga)}
 function renderCart(){cartItems.innerHTML=CART.map((c,i)=>`<div class="cart-row"><div><b>${c.nama}</b><div>${rp(priceOf(c))} x ${c.qty} = <b>${rp(priceOf(c)*c.qty)}</b></div></div><div class="qty"><button onclick="chg(${i},-1)">-</button><b>${c.qty}</b><button onclick="chg(${i},1)">+</button><button onclick="rm(${i})">×</button></div></div>`).join('')||'<div class="side-sub">Keranjang kosong</div>';saveCartAuto();calc()}
-function chg(i,n){CART[i].qty+=n;if(CART[i].qty<=0)CART.splice(i,1);renderCart()}function rm(i){CART.splice(i,1);renderCart()}
+function chg(i,n){let next=Number(CART[i].qty)+n;if(n>0 && Number(CART[i].stok||0)>=0 && next>Number(CART[i].stok||0))return alert('Stok lokal tidak cukup');CART[i].qty=next;if(CART[i].qty<=0)CART.splice(i,1);renderCart()}function rm(i){CART.splice(i,1);renderCart()}
 function promoDiskon(sub){let id=Number(voucher.value||0),p=PROMOS.find(x=>x.id===id);if(!p||p.status!=='AKTIF')return 0;return p.tipe==='PERSEN'?Math.floor(sub*Number(p.nilai)/100):Number(p.nilai)}
 function calc(){let sub=CART.reduce((s,x)=>s+priceOf(x)*x.qty,0),auto=promoDiskon(sub),d=Number(diskon.value||0)+auto,p=Number(pajak.value||0),b=Number(biaya.value||0),tot=sub-d+p+b;subtotal.textContent=rp(sub);total.textContent=rp(tot);updateExtraInfo();if(!bayar.value||Number(bayar.value)<tot)bayar.value=metode.value==='UTANG'?0:tot;return {sub,d,p,b,tot}}
 diskon.oninput=calc;pajak.oninput=calc;biaya.oninput=calc;metode.onchange=calc;voucher.onchange=calc;memberSelect.onchange=renderCart;
 function clearCart(){CART=[];renderCart();customer.value='';diskon.value=0;pajak.value=0;biaya.value=0;bayar.value='';voucher.value='';localStorage.removeItem(CART_KEY)}
 async function holdCart(){if(!CART.length)return alert('Keranjang kosong');let j=await api('/api/kasir/hold',{method:'POST',body:{customer:customer.value||'Umum',items:CART}});toast('Keranjang disimpan: '+j.kode);clearCart();loadHolds()}
-async function checkout(){if(!CART.length)return alert('Keranjang kosong');try{let c=calc();let items=CART.map(x=>({...x,harga:priceOf(x)}));let j=await api('/api/kasir/checkout',{method:'POST',body:{items,customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',member_id:memberSelect.value,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||'',client_time:clientTimeJakartaSQL()}});window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};printReceipt(j.toko,j.transaction,j.items);clearCart();loadProducts(false);loadTransactions();}catch(e){alert(e.message)}}
+async function checkout(){
+  if(!CART.length)return alert('Keranjang kosong');
+  let c=calc();
+  let items=CART.map(x=>({...x,harga:priceOf(x)}));
+  let body={items,customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',member_id:memberSelect.value,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||'',client_time:clientTimeJakartaSQL()};
+  // POS cepat: struk langsung keluar dari data lokal, sync online jalan di belakang.
+  enqueueCheckout(body);
+  let j=makeOfflineReceipt(body);
+  window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
+  printReceipt(j.toko,j.transaction,j.items);
+  rememberLocalSale(j);
+  adjustLocalProductStock(items);
+  clearCart();
+  toast('Transaksi tersimpan lokal, sync online berjalan otomatis');
+  syncOneCheckout(body);
+  setTimeout(()=>{loadTransactions();syncProductCache();},1200);
+}
 async function loadTransactions(){let j=await api('/api/admin/transactions');let html=table(j.data,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status','status'],['Aksi',r=>`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);historyTable.innerHTML=html;loadHolds()}
 async function loadHolds(){let j=await api('/api/kasir/holds');holdTable.innerHTML=table(j.data,[['Kode','kode'],['Customer','customer'],['Tanggal','created_at'],['Aksi',r=>`<button class="btn" onclick='loadHold(${r.id},${JSON.stringify(r.items_json)})'>Buka</button> <button class="btn danger" onclick="delHold(${r.id})">Hapus</button>`]])}
 async function loadHold(id,json){CART=JSON.parse(json);renderCart();showSection('kasirPage');await delHold(id,false)}async function delHold(id,msg=true){await api('/api/kasir/holds/'+id,{method:'DELETE'});if(msg)toast('Hold dihapus');loadHolds()}
@@ -107,7 +137,7 @@ function updateExtraInfo(){try{voucherInfo.textContent='Voucher: '+(voucher.opti
 function openExtraModal(box){['voucherBox','diskonBox','pajakBox','biayaBox'].forEach(id=>document.getElementById(id)?.classList.add('hidden'));document.getElementById(box)?.classList.remove('hidden');extraModal.classList.remove('hidden');let title={voucherBox:'Pilih Voucher',diskonBox:'Atur Diskon',pajakBox:'Atur Pajak',biayaBox:'Atur Biaya'}[box]||'Atur';extraModalTitle.textContent=title;voucherPopup.value=voucher.value;diskonPopup.value=diskon.value||0;pajakPopup.value=pajak.value||0;biayaPopup.value=biaya.value||0;}
 function closeExtraModal(){extraModal.classList.add('hidden')}
 function applyExtraModal(){voucher.value=voucherPopup.value;diskon.value=diskonPopup.value||0;pajak.value=pajakPopup.value||0;biaya.value=biayaPopup.value||0;calc();saveCartAuto();closeExtraModal();}
-Promise.allSettled([loadProducts(),loadTransactions(),loadMembers(),loadPromos(),loadShift()]);renderCart();restoreCartAuto();bindShortcuts();setInterval(loadShift,30000);
+Promise.allSettled([syncProductCache(),loadTransactions(),loadMembers(),loadPromos(),loadShift()]);renderCart();restoreCartAuto();bindShortcuts();renderSyncReport();setInterval(()=>{loadShift();renderSyncReport()},30000);
 </script>
 <div id="extraModal" class="extra-modal hidden"><div class="extra-modal-backdrop" onclick="closeExtraModal()"></div><div class="extra-modal-card"><div class="extra-modal-head"><b id="extraModalTitle">Atur</b><button class="btn" type="button" onclick="closeExtraModal()">Tutup</button></div><div id="voucherBox" class="extra-box"><label>Voucher</label><select id="voucherPopup"><option value="">Tanpa voucher</option></select></div><div id="diskonBox" class="extra-box hidden"><label>Diskon Rupiah</label><input id="diskonPopup" type="number" value="0"></div><div id="pajakBox" class="extra-box hidden"><label>Pajak Rupiah</label><input id="pajakPopup" type="number" value="0"></div><div id="biayaBox" class="extra-box hidden"><label>Biaya Tambahan Rupiah</label><input id="biayaPopup" type="number" value="0"></div><button class="btn primary" type="button" onclick="applyExtraModal()" style="width:100%;margin-top:12px">Simpan</button></div></div>
 </body></html>
