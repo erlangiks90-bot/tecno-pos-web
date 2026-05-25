@@ -462,3 +462,11 @@ body.sidebar-is-open .sidebar-backdrop{display:block}.sidebar{z-index:20}
 .scan-line{position:absolute;left:8%;right:8%;top:50%;height:3px;background:rgba(255,255,255,.9);box-shadow:0 0 18px rgba(255,255,255,.8)}
 .barcode-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
 @media(max-width:700px){.barcode-row{grid-template-columns:1fr}.scanner-box{min-height:220px}}
+
+/* FIX SCAN BARCODE KAMERA HP */
+.scanner-pro{position:relative;overflow:hidden;border-radius:18px;background:#000;min-height:260px}
+.scanner-pro video{width:100%;height:320px;object-fit:cover;background:#000;display:block}
+.scan-frame{position:absolute;left:7%;right:7%;top:32%;height:32%;border:3px solid rgba(255,255,255,.9);border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.22)}
+.scan-line{position:absolute;left:10%;right:10%;top:48%;height:3px;background:rgba(255,90,0,.9);box-shadow:0 0 14px rgba(255,90,0,.9)}
+.scan-actions{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap}.scan-actions .btn{flex:1;min-width:120px}
+@media(max-width:640px){.scanner-pro video{height:280px}.scan-frame{left:5%;right:5%;top:34%;height:28%}}

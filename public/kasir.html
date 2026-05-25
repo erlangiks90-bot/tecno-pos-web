@@ -118,20 +118,40 @@ productGrid.addEventListener('click',e=>{const btn=e.target.closest('.add-produc
 document.addEventListener('click',e=>{if(document.body.classList.contains('search-open')&&!e.target.closest('.pos-search-panel'))closeSearchPopup()});
 
 async function requestVoid(id){let alasan=prompt('Alasan batal/void transaksi?');if(!alasan)return;await api('/api/kasir/void-request',{method:'POST',body:{transaksi_id:id,alasan}});toast('Permintaan void dikirim ke admin')}
-let scanStream=null;
-async function openCameraScanner(){
-  const m=modal(`<div class="modal-head no-print"><b>Scan Barcode Kamera HP</b><button class="x" onclick="closeScanner()">X</button></div><div class="scan-modal"><video id="scanVideo" autoplay playsinline></video><p class="side-sub">Arahkan kamera ke barcode. Jika browser belum mendukung pembacaan otomatis, ketik hasil barcode di bawah.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik / tempel barcode"><button class="btn primary" onclick="useManualBarcode()">Cari</button></div></div>`);
+let scanStream=null, scanDetector=null, scanBusy=false;
+function makeKasirDetector(){
+  if(!('BarcodeDetector' in window)) return null;
+  const formats=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','codabar','itf','qr_code','data_matrix','pdf417'];
+  try{return new BarcodeDetector({formats});}catch(e){try{return new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code']});}catch(_){return null;}}
+}
+async function detectKasirBarcode(video, detector){
+  let codes=[];
+  try{codes=await detector.detect(video);}catch(e){}
+  if(codes?.length) return codes[0].rawValue||'';
   try{
-    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    scanVideo.srcObject=scanStream;
-    if('BarcodeDetector' in window){
-      const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','qr_code']});
-      const tick=async()=>{try{if(!document.getElementById('scanVideo'))return;let codes=await detector.detect(scanVideo);if(codes.length){search.value=codes[0].rawValue;closeScanner();loadProducts();return}}catch(e){} requestAnimationFrame(tick)};tick();
-    }
+    const w=video.videoWidth||640,h=video.videoHeight||480;if(!w||!h)return '';
+    const c=document.createElement('canvas'),ctx=c.getContext('2d',{willReadFrequently:true});
+    const cropW=Math.floor(w*0.9),cropH=Math.floor(h*0.45),sx=Math.floor((w-cropW)/2),sy=Math.floor((h-cropH)/2);
+    c.width=900;c.height=360;ctx.drawImage(video,sx,sy,cropW,cropH,0,0,c.width,c.height);
+    codes=await detector.detect(c); if(codes?.length) return codes[0].rawValue||'';
+  }catch(e){}
+  return '';
+}
+async function openCameraScanner(){
+  modal(`<div class="modal-head no-print"><b>Scan Barcode Kamera HP</b><button class="x" onclick="closeScanner()">X</button></div><div class="scan-modal"><div class="scanner-box scanner-pro"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-frame"></div><div class="scan-line"></div></div><p class="side-sub">Tips: jarak 10–20 cm, jangan blur/pantul. Kalau label toko tidak terbaca, ketik kode di bawah barcode.</p><div class="scan-actions"><button class="btn" onclick="toggleKasirTorch()">Lampu</button><button class="btn" onclick="scanKasirNow()">Coba Baca</button></div><div class="searchbar"><input id="manualBarcode" inputmode="text" placeholder="Ketik / tempel barcode"><button class="btn primary" onclick="useManualBarcode()">Cari</button></div></div>`);
+  try{
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},focusMode:{ideal:'continuous'}}});
+    scanVideo.srcObject=scanStream; await scanVideo.play();
+    try{const tr=scanStream.getVideoTracks()[0]; const caps=tr.getCapabilities?.()||{}; if(caps.zoom){await tr.applyConstraints({advanced:[{zoom:Math.min(caps.zoom.max||2, Math.max(caps.zoom.min||1,1.5))}]});}}catch(e){}
+    scanDetector=makeKasirDetector();
+    if(!scanDetector){toast('Scanner otomatis tidak didukung browser ini. Pakai input manual.');return;}
+    const tick=async()=>{try{if(!document.getElementById('scanVideo'))return;if(!scanBusy){scanBusy=true;let val=await detectKasirBarcode(scanVideo,scanDetector);scanBusy=false;if(val){search.value=val;closeScanner();scanOrSearch();return;}}}catch(e){scanBusy=false}setTimeout(()=>requestAnimationFrame(tick),120)};tick();
   }catch(e){alert('Kamera tidak bisa dibuka. Pastikan izin kamera aktif atau gunakan input manual.')}
 }
-function useManualBarcode(){search.value=document.getElementById('manualBarcode').value;closeScanner();loadProducts()}
-function closeScanner(){try{scanStream?.getTracks()?.forEach(t=>t.stop())}catch(e){};closeModal()}
+async function scanKasirNow(){try{if(!scanDetector||!document.getElementById('scanVideo'))return toast('Scanner belum siap');let val=await detectKasirBarcode(scanVideo,scanDetector);if(val){search.value=val;closeScanner();scanOrSearch()}else toast('Belum terbaca. Atur jarak/fokus atau ketik manual.')}catch(e){toast('Belum terbaca')}}
+async function toggleKasirTorch(){try{const tr=scanStream?.getVideoTracks?.()[0]; const caps=tr?.getCapabilities?.()||{}; if(!caps.torch)return toast('Lampu tidak didukung'); window.__kasirTorch=!window.__kasirTorch; await tr.applyConstraints({advanced:[{torch:window.__kasirTorch}]});}catch(e){toast('Lampu tidak bisa aktif')}}
+function useManualBarcode(){search.value=document.getElementById('manualBarcode').value.trim();closeScanner();scanOrSearch()}
+function closeScanner(){try{scanStream?.getTracks()?.forEach(t=>t.stop())}catch(e){};scanStream=null;scanDetector=null;closeModal()}
 
 
 function updateExtraInfo(){try{voucherInfo.textContent='Voucher: '+(voucher.options[voucher.selectedIndex]?.text||'-');diskonInfo.textContent='Diskon: '+rp(Number(diskon.value||0));pajakInfo.textContent='Pajak: '+rp(Number(pajak.value||0));biayaInfo.textContent='Biaya: '+rp(Number(biaya.value||0));}catch(e){}}
