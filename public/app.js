@@ -324,24 +324,58 @@ function renderSyncReport(targetId='syncReportTable'){
 }
 
 async function openCameraScanner(targetSelector){
+  // FIX ADMIN SCAN: jangan memakai modal() karena modal scanner akan menghapus popup Tambah Produk.
+  // Scanner dibuat sebagai overlay sendiri, supaya input #productBarcodeInput tetap ada dan bisa diisi.
   const target = targetSelector ? document.querySelector(targetSelector) : (document.activeElement?.matches?.('input') ? document.activeElement : document.getElementById('search'));
+  if(!target){alert('Kolom barcode tidak ditemukan. Tutup popup lalu buka Tambah Produk lagi.');return;}
   if(!navigator.mediaDevices?.getUserMedia){alert('Kamera browser belum didukung. Ketik barcode manual.');return;}
+
+  closeScannerModal(true);
   let stream=null, stopped=false, detector=null;
   try{
-    if('BarcodeDetector' in window){detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e']});}
+    if('BarcodeDetector' in window){
+      detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','code_93','itf','qr_code','upc_a','upc_e']});
+    }
   }catch(e){}
+
+  const overlay=document.createElement('div');
+  overlay.className='scanner-overlay no-print';
+  overlay.innerHTML=`
+    <div class="scanner-card">
+      <div class="modal-head">
+        <b>Scan Barcode Kamera</b>
+        <button class="x" type="button" onclick="closeScannerModal()">X</button>
+      </div>
+      <div class="scanner-box">
+        <video id="scanVideo" playsinline autoplay muted></video>
+        <div class="scan-line"></div>
+      </div>
+      <p class="side-sub">Arahkan kamera ke barcode. Untuk label kecil, mundurkan HP 10–15 cm dan jangan goyang.</p>
+      <div class="searchbar">
+        <input id="manualBarcode" placeholder="Ketik kode barcode manual">
+        <button class="btn primary" type="button" onclick="applyManualBarcode('${target.id||''}')">Pakai</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn" type="button" onclick="toggleScannerTorch()">Lampu</button>
+        <button class="btn" type="button" onclick="closeScannerModal()">Tutup</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  window.__scannerStop=()=>{stopped=true; try{stream?.getTracks()?.forEach(t=>t.stop())}catch(e){}};
   try{
-    modal(`<div class="modal-head"><b>Scan Barcode Kamera</b><button class="x" onclick="closeScannerModal()">X</button></div><div class="scanner-box"><video id="scanVideo" playsinline autoplay></video><div class="scan-line"></div></div><p class="side-sub">Arahkan kamera HP ke barcode. Jika tidak terbaca, isi kode manual.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik kode barcode manual"><button class="btn primary" onclick="applyManualBarcode('${target?.id||''}')">Pakai</button></div>`);
-    window.__scannerStop=()=>{stopped=true; try{stream?.getTracks()?.forEach(t=>t.stop())}catch(e){}};
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-    const video=document.getElementById('scanVideo'); video.srcObject=stream; await video.play();
-    if(!detector){toast('Scanner otomatis tidak didukung browser ini, pakai input manual.');return;}
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}}});
+    window.__scannerStream=stream;
+    const video=document.getElementById('scanVideo');
+    video.srcObject=stream;
+    await video.play();
+    if(!detector){toast('Browser belum support scan otomatis. Ketik kode manual.');return;}
     const tick=async()=>{
       if(stopped || !document.getElementById('scanVideo')) return;
       try{
         const codes=await detector.detect(video);
         if(codes && codes.length){
-          const val=codes[0].rawValue||'';
+          const val=String(codes[0].rawValue||'').trim();
           if(val){ applyScannedBarcode(val,target); return; }
         }
       }catch(e){}
@@ -355,17 +389,36 @@ async function openCameraScanner(targetSelector){
 }
 function applyScannedBarcode(val,target){
   try{window.__scannerStop?.()}catch(e){}
-  const el=target || document.getElementById('search');
-  if(el){el.value=val; el.dispatchEvent(new Event('input',{bubbles:true}));}
-  closeModal();
+  const el=target || document.getElementById('productBarcodeInput') || document.getElementById('search');
+  if(el){
+    el.value=val;
+    el.setAttribute('value',val);
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    try{el.focus()}catch(e){}
+  }
+  closeScannerModal(true);
   toast('Barcode terbaca: '+val);
   if(el?.id==='search' && typeof scanOrSearch==='function') scanOrSearch();
 }
-function closeScannerModal(){try{window.__scannerStop?.()}catch(e){} closeModal();}
+function closeScannerModal(skipStop=false){
+  if(!skipStop){try{window.__scannerStop?.()}catch(e){}}
+  document.querySelector('.scanner-overlay')?.remove();
+}
 function applyManualBarcode(targetId){
   const val=document.getElementById('manualBarcode')?.value?.trim();
   if(!val) return alert('Isi kode dulu');
-  applyScannedBarcode(val, targetId?document.getElementById(targetId):document.getElementById('search'));
+  const target=targetId?document.getElementById(targetId):(document.getElementById('productBarcodeInput')||document.getElementById('search'));
+  applyScannedBarcode(val,target);
+}
+async function toggleScannerTorch(){
+  try{
+    const track=window.__scannerStream?.getVideoTracks?.()[0];
+    const caps=track?.getCapabilities?.();
+    if(!caps?.torch){toast('Lampu kamera tidak didukung browser ini');return;}
+    window.__torchOn=!window.__torchOn;
+    await track.applyConstraints({advanced:[{torch:window.__torchOn}]});
+  }catch(e){toast('Lampu tidak bisa aktif');}
 }
 
 function setupMobileBackGuard(){
