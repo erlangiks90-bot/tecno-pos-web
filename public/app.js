@@ -22,14 +22,41 @@ function getUserTheme(){return localStorage.getItem(prefKey('theme'))||localStor
 function getUserAccent(){return localStorage.getItem(prefKey('accent'))||localStorage.getItem('tecno_accent')||API.user?.warna_tema||API.toko?.warna_tema||'blue';}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
 const HYBRID_QUEUE_KEY='tecno_offline_checkout_queue_v1';
+function trxDateCode(){
+  const d=new Date();
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}${m}${day}`;
+}
+function makeLocalInvoice(){
+  const day=trxDateCode();
+  const key='tecno_local_trx_seq_'+day;
+  const next=(Number(localStorage.getItem(key)||'0')||0)+1;
+  localStorage.setItem(key,String(next));
+  return `TRX-${day}-${String(next).padStart(6,'0')}`;
+}
+function ensureInvoice(body){
+  if(!body.invoice || String(body.invoice).startsWith('OFF-')) body.invoice=makeLocalInvoice();
+  if(!body.offline_client_id) body.offline_client_id=body.invoice;
+  return body.invoice;
+}
+function numClean(v){
+  if(typeof v==='number') return Number.isFinite(v)?v:0;
+  let s=String(v??'').trim();
+  if(!s) return 0;
+  s=s.replace(/Rp/gi,'').replace(/\s/g,'');
+  if(s.includes('.') && s.includes(',')) s=s.replace(/\./g,'').replace(',', '.');
+  else if(s.includes('.')) s=s.replace(/\./g,'');
+  else s=s.replace(',', '.');
+  const n=Number(s);
+  return Number.isFinite(n)?n:0;
+}
 function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]')}catch(e){return []}}
 function saveHybridQueue(q){localStorage.setItem(HYBRID_QUEUE_KEY,JSON.stringify(q));updateHybridBadge()}
 function makeOfflineReceipt(body){
   const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
   const diskon=Number(body.diskon||0), pajak=Number(body.pajak||0), biaya=Number(body.biaya||0);
   const total=subtotal-diskon+pajak+biaya, bayar=Number(body.bayar||0), kembali=Math.max(0,bayar-total);
-  const id=body.offline_client_id || ('OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999));
-  body.offline_client_id=id;
+  const id=ensureInvoice(body);
   const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
   return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'}};
 }
@@ -48,7 +75,7 @@ async function api(url,opt={}){
   }catch(err){
     if(url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST'){
       const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
-      if(!body.offline_client_id) body.offline_client_id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+      ensureInvoice(body);
       const q=hybridQueue();
       q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
       saveHybridQueue(q);
@@ -60,7 +87,7 @@ async function api(url,opt={}){
 }
 
 function enqueueCheckout(body){
-  if(!body.offline_client_id) body.offline_client_id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+  ensureInvoice(body);
   const q=hybridQueue();
   const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
   if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
@@ -361,7 +388,7 @@ function setupMobileBackGuard(){
   });
 }
 function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>{let v=typeof c[1]==='function'?c[1](r):(r[c[1]]??''); if(typeof c[1]==='string' && /(_at|tanggal|created_at)$/i.test(c[1]) && v) v=formatDateID(v); return `<td>${v}</td>`}).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
-function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No: ${tr.invoice}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
+function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No Transaksi: ${tr.invoice||tr.offline_client_id||'-'}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
 function escposText(toko,tr,items){
   const line='--------------------------------';
   const cut=(txt,w=32)=>String(txt||'').slice(0,w);
@@ -372,7 +399,7 @@ function escposText(toko,tr,items){
   if(toko.alamat)out.push(cut(toko.alamat));
   if(toko.no_hp)out.push(cut(toko.no_hp));
   out.push(line);
-  out.push('No: '+tr.invoice);
+  out.push('No Transaksi: '+(tr.invoice||tr.offline_client_id||'-'));
   out.push('Kasir: '+(tr.kasir||API.user?.nama||'-'));
   out.push(formatDateID(tr.created_at));
   out.push(line);

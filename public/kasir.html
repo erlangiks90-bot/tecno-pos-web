@@ -89,6 +89,7 @@ async function checkout(){
   let c=calc();
   let items=CART.map(x=>({...x,harga:priceOf(x)}));
   let body={items,customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',member_id:memberSelect.value,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||'',client_time:clientTimeJakartaSQL()};
+  ensureInvoice(body);
   // POS cepat: struk langsung keluar dari data lokal, sync online jalan di belakang.
   enqueueCheckout(body);
   let j=makeOfflineReceipt(body);

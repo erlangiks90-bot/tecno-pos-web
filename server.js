@@ -97,7 +97,22 @@ async function log(user, aksi, detail='') {
 async function initDb(){ await pool.query('SELECT 1'); }
 function now() { return new Date().toISOString(); }
 function rupiah(n) { return Number(n || 0); }
-function code(prefix) { return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random()*999).toString().padStart(3,'0')}`; }
+function code(prefix) {
+  const d=new Date();
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  const seq=Date.now().toString(36).toUpperCase().slice(-5)+Math.floor(Math.random()*999).toString().padStart(3,'0');
+  return `${prefix}-${y}${m}${day}-${seq}`;
+}
+function safeNum(v){
+  if(typeof v==='number') return Number.isFinite(v)?v:0;
+  let x=String(v??'').trim().replace(/Rp/gi,'').replace(/\s/g,'');
+  if(!x) return 0;
+  if(x.includes('.') && x.includes(',')) x=x.replace(/\./g,'').replace(',', '.');
+  else if(x.includes('.')) x=x.replace(/\./g,'');
+  else x=x.replace(',', '.');
+  const n=Number(x);
+  return Number.isFinite(n)?n:0;
+}
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -472,7 +487,8 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
       return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
     }
   }
-  const invoice=code('TRX');
+  let invoice=String(b.invoice || '').trim();
+  if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
   const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
@@ -662,11 +678,13 @@ app.post('/api/admin/cashbook', auth, ensureRole(['admin']), async (req,res)=>{
 });
 app.get('/api/admin/profit', auth, ensureRole(['admin']), async (req,res)=>{
   const tid=req.user.toko_id;
-  const penjualan=((await get("SELECT COALESCE(SUM(total),0) total FROM transactions WHERE toko_id=? AND status<>'VOID'",[tid]))?.total)||0;
-  const modal=((await get(`SELECT COALESCE(SUM(ti.qty * COALESCE(p.harga_beli,0)),0) total FROM transaction_items ti JOIN transactions tr ON tr.id=ti.transaction_id LEFT JOIN products p ON p.id=ti.product_id WHERE tr.toko_id=? AND tr.status<>'VOID'`,[tid]))?.total)||0;
-  const pengeluaran=((await get("SELECT COALESCE(SUM(nominal),0) total FROM cashbooks WHERE toko_id=? AND tipe='KELUAR'",[tid]))?.total)||0;
-  const kasMasuk=((await get("SELECT COALESCE(SUM(nominal),0) total FROM cashbooks WHERE toko_id=? AND tipe='MASUK'",[tid]))?.total)||0;
-  res.json({ok:true,data:{penjualan,modal,pengeluaran,kas_masuk:kasMasuk,laba_kotor:penjualan-modal,laba_bersih:penjualan-modal-pengeluaran+kasMasuk}});
+  const penjualan=safeNum(((await get("SELECT COALESCE(SUM(total),0) total FROM transactions WHERE toko_id=? AND status<>'VOID'",[tid]))?.total)||0);
+  const modal=safeNum(((await get(`SELECT COALESCE(SUM(ti.qty * COALESCE(p.harga_beli,0)),0) total FROM transaction_items ti JOIN transactions tr ON tr.id=ti.transaction_id LEFT JOIN products p ON p.id=ti.product_id WHERE tr.toko_id=? AND tr.status<>'VOID'`,[tid]))?.total)||0);
+  const pengeluaran=safeNum(((await get("SELECT COALESCE(SUM(nominal),0) total FROM cashbooks WHERE toko_id=? AND tipe='KELUAR'",[tid]))?.total)||0);
+  const kasMasuk=safeNum(((await get("SELECT COALESCE(SUM(nominal),0) total FROM cashbooks WHERE toko_id=? AND tipe='MASUK'",[tid]))?.total)||0);
+  const labaKotor=penjualan-modal;
+  const labaBersih=labaKotor-pengeluaran+kasMasuk;
+  res.json({ok:true,data:{penjualan,modal,pengeluaran,kas_masuk:kasMasuk,laba_kotor:labaKotor,laba_bersih:labaBersih,rumus:'Penjualan - Modal Barang - Pengeluaran + Kas Masuk Tambahan'}});
 });
 app.get('/api/admin/security', auth, ensureRole(['admin']), async (req,res)=>res.json({ok:true,data:await ensureSec(req.user.toko_id)}));
 app.put('/api/admin/security', auth, ensureRole(['admin']), async (req,res)=>{
