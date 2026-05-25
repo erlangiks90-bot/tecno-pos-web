@@ -244,7 +244,8 @@ async function openCameraScanner(targetSelector){
   try{
     if('BarcodeDetector' in window){detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e']});}
   }catch(e){}
-  modal(`<div class="modal-head"><b>Scan Barcode Kamera</b><button class="x" onclick="closeScannerModal()">X</button></div><div class="scanner-box"><video id="scanVideo" playsinline autoplay></video><div class="scan-line"></div></div><p class="side-sub">Arahkan kamera HP ke barcode. Jika tidak terbaca, isi kode manual.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik kode barcode manual"><button class="btn primary" onclick="applyManualBarcode('${target?.id||''}')">Pakai</button></div>`);
+  try{
+    modal(`<div class="modal-head"><b>Scan Barcode Kamera</b><button class="x" onclick="closeScannerModal()">X</button></div><div class="scanner-box"><video id="scanVideo" playsinline autoplay></video><div class="scan-line"></div></div><p class="side-sub">Arahkan kamera HP ke barcode. Jika tidak terbaca, isi kode manual.</p><div class="searchbar"><input id="manualBarcode" placeholder="Ketik kode barcode manual"><button class="btn primary" onclick="applyManualBarcode('${target?.id||''}')">Pakai</button></div>`);
     window.__scannerStop=()=>{stopped=true; try{stream?.getTracks()?.forEach(t=>t.stop())}catch(e){}};
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
     const video=document.getElementById('scanVideo'); video.srcObject=stream; await video.play();
