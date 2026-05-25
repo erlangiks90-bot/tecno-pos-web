@@ -1,7 +1,7 @@
 {
   "name": "tecno-pos-pro",
-  "version": "15.1.0",
-  "description": "TECNO POS V15 Supabase PostgreSQL Ready",
+  "version": "16.0.0-hybrid-railway",
+  "description": "TECNO POS Hybrid Railway Supabase PWA Offline Queue",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

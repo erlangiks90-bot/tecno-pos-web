@@ -21,17 +21,72 @@ function prefKey(name){return API.user?.id?`tecno_${name}_${API.user.id}`:`tecno
 function getUserTheme(){return localStorage.getItem(prefKey('theme'))||localStorage.getItem('tecno_theme')||API.user?.mode_tema||API.toko?.mode_tema||'eye';}
 function getUserAccent(){return localStorage.getItem(prefKey('accent'))||localStorage.getItem('tecno_accent')||API.user?.warna_tema||API.toko?.warna_tema||'blue';}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
+const HYBRID_QUEUE_KEY='tecno_offline_checkout_queue_v1';
+function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]')}catch(e){return []}}
+function saveHybridQueue(q){localStorage.setItem(HYBRID_QUEUE_KEY,JSON.stringify(q));updateHybridBadge()}
+function makeOfflineReceipt(body){
+  const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
+  const diskon=Number(body.diskon||0), pajak=Number(body.pajak||0), biaya=Number(body.biaya||0);
+  const total=subtotal-diskon+pajak+biaya, bayar=Number(body.bayar||0), kembali=Math.max(0,bayar-total);
+  const id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+  const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
+  return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'}};
+}
 async function api(url,opt={}){
   opt.headers=Object.assign({'Content-Type':'application/json','x-user-id':API.user?.id||''},opt.headers||{});
+  const originalBody=opt.body;
   if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);
-  const r=await fetch(url,opt);
-  const text=await r.text();
-  let j={};
-  try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
-  if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/');throw new Error(j.message)}
-  if(!r.ok||j.ok===false)throw new Error(j.message||'Error');
-  return j;
+  try{
+    const r=await fetch(url,opt);
+    const text=await r.text();
+    let j={};
+    try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
+    if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/');throw new Error(j.message)}
+    if(!r.ok||j.ok===false)throw new Error(j.message||'Error');
+    return j;
+  }catch(err){
+    if(url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST'){
+      const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
+      if(!body.offline_client_id) body.offline_client_id='OFF-'+Date.now().toString(36).toUpperCase()+'-'+Math.floor(Math.random()*9999);
+      const q=hybridQueue();
+      q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
+      saveHybridQueue(q);
+      toast('MODE OFFLINE: transaksi tersimpan, nanti auto-sync');
+      return makeOfflineReceipt(body);
+    }
+    throw err;
+  }
 }
+async function syncOfflineQueue(){
+  if(!API.user) return;
+  let q=hybridQueue();
+  if(!q.length){updateHybridBadge();return;}
+  if(!navigator.onLine){updateHybridBadge();return;}
+  let changed=false;
+  for(const item of q){
+    if(item.status==='synced') continue;
+    try{
+      const r=await fetch(item.url,{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
+      const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
+      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();changed=true;}
+    }catch(e){}
+  }
+  const before=q.length;
+  q=q.filter(x=>x.status!=='synced');
+  if(changed){saveHybridQueue(q);toast(before-q.length+' transaksi offline berhasil sync ke online')}
+  updateHybridBadge();
+}
+function updateHybridBadge(){
+  let el=document.getElementById('hybridStatus');
+  if(!el){el=document.createElement('div');el.id='hybridStatus';el.className='hybrid-status';document.body.appendChild(el)}
+  const n=hybridQueue().filter(x=>x.status!=='synced').length;
+  el.textContent=(navigator.onLine?'ONLINE':'OFFLINE')+(n?` • pending sync ${n}`:' • tersinkron');
+  el.classList.toggle('offline',!navigator.onLine||n>0);
+}
+window.addEventListener('online',()=>{updateHybridBadge();syncOfflineQueue()});
+window.addEventListener('offline',updateHybridBadge);
+setInterval(syncOfflineQueue,30000);
+document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});});
 
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
@@ -58,7 +113,49 @@ function logout(){
   const m=modal(`<div class="modal-head"><b>Keluar dari akun?</b><button class="x" onclick="closeModal()">X</button></div><p>Apakah yakin ingin keluar?</p><div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px"><button class="btn" onclick="closeModal()">BATAL</button><button class="btn danger" onclick="confirmLogout()">LOGOUT</button></div>`);
   m.addEventListener('click',e=>{if(e.target===m)closeModal()});
 }
-function confirmLogout(){localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/')}
+function confirmLogout(){localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');localStorage.removeItem('tecno_locked');location.replace('/')}
+function lockKasir(){
+  if(!API.user) return;
+  localStorage.setItem('tecno_locked','1');
+  showLockScreen();
+}
+function showLockScreen(){
+  if(!API.user || localStorage.getItem('tecno_locked')!=='1') return;
+  let old=document.getElementById('lockScreen'); if(old) old.remove();
+  const d=document.createElement('div'); d.id='lockScreen'; d.className='lock-screen';
+  d.innerHTML=`<div class="lock-card"><div class="lock-icon">🔒</div><h2>${API.toko?.nama_toko||'TECNO POS'}</h2><p>Akun: <b>${API.user.nama}</b></p><input id="lockPin" inputmode="numeric" maxlength="6" placeholder="PIN kasir" autofocus><button class="btn primary" onclick="unlockKasir()">Buka Kunci</button><button class="btn" onclick="openSwitchKasir()">Ganti Kasir</button><button class="btn danger" onclick="confirmLogout()">Logout</button><p class="side-sub">Default PIN awal mengikuti password akun. Ubah PIN di Profil.</p><div id="lockMsg" class="error hidden"></div></div>`;
+  document.body.appendChild(d);
+  setTimeout(()=>document.getElementById('lockPin')?.focus(),80);
+  document.getElementById('lockPin')?.addEventListener('keydown',e=>{if(e.key==='Enter')unlockKasir()});
+}
+async function unlockKasir(){
+  try{await api('/api/unlock-pin',{method:'POST',body:{pin:document.getElementById('lockPin').value}});localStorage.removeItem('tecno_locked');document.getElementById('lockScreen')?.remove();toast('Kasir terbuka')}catch(e){let m=document.getElementById('lockMsg');m.textContent=e.message;m.classList.remove('hidden')}
+}
+async function openSwitchKasir(){
+  try{
+    const j=await api('/api/kasir/users');
+    const opts=j.data.map(u=>`<option value="${u.id}">${u.nama} (${u.username})</option>`).join('');
+    modal(`<div class="modal-head"><b>Ganti Kasir</b><button class="x" onclick="closeModal()">X</button></div><form id="switchKasirForm" class="form"><label>Kasir<select name="kasir_id">${opts}</select></label><label>PIN Kasir<input name="pin" inputmode="numeric" maxlength="6" placeholder="PIN" required></label><button class="btn primary wide">Masuk Kasir Ini</button></form>`);
+    switchKasirForm.onsubmit=async e=>{e.preventDefault();const r=await api('/api/switch-kasir-pin',{method:'POST',body:Object.fromEntries(new FormData(switchKasirForm).entries())});localStorage.setItem('tecno_user',JSON.stringify(r.user));localStorage.setItem('tecno_toko',JSON.stringify(r.toko||{}));localStorage.removeItem('tecno_locked');location.replace('/kasir.html')};
+  }catch(e){alert(e.message)}
+}
+function proSessionButtons(){
+  if(!API.user) return '';
+  const pinBtn=API.user.role==='developer'?'':`<button class="btn" onclick="openChangePin()">Ubah PIN</button>`;
+  const kasirBtns=API.user.role==='kasir'?`<button class="btn warn" onclick="lockKasir()">🔒 Kunci</button><button class="btn" onclick="openSwitchKasir()">Ganti Kasir</button>`:'';
+  return `<div class="pro-session-actions">${kasirBtns}${pinBtn}</div>`;
+}
+function injectProSessionButtons(){
+  const top=document.querySelector('.top-actions') || document.querySelector('.topbar > div:last-child');
+  if(top && !document.getElementById('proSessionTop')){const w=document.createElement('span');w.id='proSessionTop';w.innerHTML=proSessionButtons();top.appendChild(w)}
+  showLockScreen();
+}
+function openChangePin(){
+  modal(`<div class="modal-head"><b>Ubah PIN Cepat</b><button class="x" onclick="closeModal()">X</button></div><form id="pinForm" class="form"><label>PIN Baru 4-6 digit<input name="pin" inputmode="numeric" maxlength="6" required></label><button class="btn primary wide">Simpan PIN</button></form>`);
+  pinForm.onsubmit=async e=>{e.preventDefault();await api('/api/change-pin',{method:'POST',body:Object.fromEntries(new FormData(pinForm).entries())});closeModal();toast('PIN berhasil diubah')};
+}
+document.addEventListener('DOMContentLoaded',injectProSessionButtons);
+
 async function uploadFileInput(input, type='produk'){
   const f=input.files?.[0]; if(!f) return '';
   if(f.size>5*1024*1024){alert('Ukuran foto maksimal 5 MB');input.value='';return ''}

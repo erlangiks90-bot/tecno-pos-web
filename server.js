@@ -52,6 +52,39 @@ async function get(sql, params = []) { const r = await pool.query(toPgSql(sql), 
 async function all(sql, params = []) { const r = await pool.query(toPgSql(sql), params); return r.rows; }
 async function exec(sql) { await pool.query(sql); }
 
+
+async function createJsonBackup(createdBy=0, prefix='backup') {
+  const backupDir = path.join(__dirname, 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+  const tables = [
+    'tokos','users','products','transactions','transaction_items','debts','audit_logs','holds',
+    'suppliers','restocks','members','promos','attendances','targets','price_approvals','billings',
+    'cashbooks','cash_closings','security_settings','void_requests','backup_reminders','shift_sessions'
+  ];
+  const data = {
+    app: 'TECNO POS',
+    type: 'SUPABASE_POSTGRES_JSON_BACKUP',
+    created_at: new Date().toISOString(),
+    created_by: createdBy,
+    tables: {}
+  };
+
+  for (const table of tables) {
+    try {
+      data.tables[table] = await all(`SELECT * FROM ${table} ORDER BY id ASC`);
+    } catch (e) {
+      data.tables[table] = { error: e.message };
+    }
+  }
+
+  const fileName = `${prefix}-${Date.now()}.json`;
+  const fullPath = path.join(backupDir, fileName);
+  fs.writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf8');
+  try { await run('INSERT INTO app_backups(file,created_by) VALUES(?,?)', [fileName, createdBy]); } catch(e) {}
+  return fileName;
+}
+
 async function log(user, aksi, detail='') {
   try {
     const userId = user?.id || 0;
@@ -93,7 +126,7 @@ async function migrate() {
   );
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY, toko_id INTEGER, nama TEXT NOT NULL, username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL, role TEXT NOT NULL, status TEXT DEFAULT 'AKTIF',
+    password TEXT NOT NULL, pin TEXT DEFAULT '123456', role TEXT NOT NULL, status TEXT DEFAULT 'AKTIF',
     mode_tema TEXT DEFAULT 'eye', warna_tema TEXT DEFAULT 'blue',
     created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Jakarta')
   );
@@ -146,6 +179,9 @@ async function migrate() {
   CREATE TABLE IF NOT EXISTS backup_reminders (id SERIAL PRIMARY KEY, toko_id INTEGER UNIQUE, last_backup_at TEXT DEFAULT '', remind_days INTEGER DEFAULT 7);
   CREATE TABLE IF NOT EXISTS shift_sessions (id SERIAL PRIMARY KEY, toko_id INTEGER NOT NULL, kasir_id INTEGER NOT NULL, kasir_nama TEXT DEFAULT '', uang_awal INTEGER DEFAULT 0, uang_sistem INTEGER DEFAULT 0, uang_fisik INTEGER DEFAULT 0, selisih INTEGER DEFAULT 0, status TEXT DEFAULT 'OPEN', catatan_buka TEXT DEFAULT '', catatan_tutup TEXT DEFAULT '', buka_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Jakarta'), tutup_at TEXT DEFAULT '');
   `);
+
+  try { await exec("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS offline_client_id TEXT UNIQUE"); } catch(e) { console.log('offline_client_id skip', e.message); }
+  try { await exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'"); } catch(e) { console.log('pin skip', e.message); }
 
   let toko = await get('SELECT * FROM tokos LIMIT 1');
   if (!toko) {
@@ -220,10 +256,41 @@ app.post('/api/login', async (req,res)=>{
   toko = toko ? await suspendExpiredToko(toko) : toko;
   if (toko && toko.status !== 'AKTIF') return res.status(403).json({ ok:false, message: toko.status==='SUSPEND' ? 'Toko disuspend / masa aktif habis. Hubungi developer.' : 'Toko nonaktif, hubungi developer' });
   await log(user, 'LOGIN', user.username);
-  res.json({ ok:true, user: { id:user.id, nama:user.nama, username:user.username, role:user.role, toko_id:user.toko_id }, toko });
+  res.json({ ok:true, user: { id:user.id, nama:user.nama, username:user.username, role:user.role, toko_id:user.toko_id, pin_set: !!user.pin, remember_until: new Date(Date.now() + (user.role==='kasir'?7:30)*86400000).toISOString() }, toko });
 });
 
 app.get('/api/me', auth, async (req,res)=> { const toko=await tokoFor(req.user); res.json({ ok:true, user:req.user, toko, limits: packageLimit(toko), billing: billingStatus(toko) }); });
+
+// POS sungguhan: lock screen pakai PIN dan ganti kasir cepat tanpa logout perangkat.
+app.post('/api/unlock-pin', auth, async (req,res)=>{
+  const pin = String(req.body.pin || '').trim();
+  if(!pin) return res.status(400).json({ok:false,message:'PIN wajib diisi'});
+  const user = await get('SELECT * FROM users WHERE id=?', [req.user.id]);
+  if(!user || String(user.pin || user.password) !== pin) return res.status(401).json({ok:false,message:'PIN salah'});
+  await log(user,'UNLOCK PIN','Buka kunci kasir');
+  res.json({ok:true});
+});
+app.post('/api/change-pin', auth, ensureRole(['admin','kasir']), async (req,res)=>{
+  const pin = String(req.body.pin || '').trim();
+  if(!/^\d{4,6}$/.test(pin)) return res.status(400).json({ok:false,message:'PIN harus angka 4-6 digit'});
+  await run('UPDATE users SET pin=? WHERE id=?', [pin, req.user.id]);
+  await log(req.user,'UBAH PIN','PIN akun diubah');
+  res.json({ok:true});
+});
+app.get('/api/kasir/users', auth, ensureRole(['admin','kasir']), async (req,res)=>{
+  res.json({ok:true,data:await all("SELECT id,nama,username,role,status FROM users WHERE toko_id=? AND role='kasir' AND status='AKTIF' ORDER BY nama ASC", [req.user.toko_id])});
+});
+app.post('/api/switch-kasir-pin', auth, ensureRole(['admin','kasir']), async (req,res)=>{
+  const kasirId = Number(req.body.kasir_id||0);
+  const pin = String(req.body.pin||'').trim();
+  const user = await get("SELECT * FROM users WHERE id=? AND toko_id=? AND role='kasir' AND status='AKTIF'", [kasirId, req.user.toko_id]);
+  if(!user) return res.status(404).json({ok:false,message:'Kasir tidak ditemukan'});
+  if(String(user.pin || user.password) !== pin) return res.status(401).json({ok:false,message:'PIN kasir salah'});
+  const toko = await tokoFor(user);
+  await log(user,'GANTI KASIR PIN',`Perangkat masuk ke ${user.username}`);
+  res.json({ok:true,user:{id:user.id,nama:user.nama,username:user.username,role:user.role,toko_id:user.toko_id,pin_set:!!user.pin,remember_until:new Date(Date.now()+7*86400000).toISOString()},toko});
+});
+
 
 app.get('/api/developer/summary', auth, ensureRole(['developer']), async (req,res)=>{
   const toko = (await get('SELECT COUNT(*)::int c FROM tokos')).c;
@@ -275,9 +342,8 @@ app.get('/api/developer/users', auth, ensureRole(['developer']), async (req,res)
 });
 app.get('/api/developer/logs', auth, ensureRole(['developer']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100') }));
 app.post('/api/developer/backup', auth, ensureRole(['developer']), async (req,res)=>{
-  const file = path.join(__dirname,'backups',`backup-${Date.now()}.db`);
-  fs.copyFileSync(DB_FILE, file);
-  res.json({ ok:true, file:path.basename(file) });
+  const file = await createJsonBackup(req.user.id, 'backup');
+  res.json({ ok:true, file });
 });
 
 app.get('/api/admin/summary', auth, ensureRole(['admin']), async (req,res)=>{
@@ -381,14 +447,22 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
   if(sec.mode_toko==='TUTUP') return res.status(403).json({ok:false,message:'Toko sedang mode tutup. Kasir tidak bisa transaksi.'});
   const b=req.body; const items=b.items||[];
   if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
+  const offlineClientId = String(b.offline_client_id || '').trim();
+  if (offlineClientId) {
+    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
+    if (old) {
+      const toko=await tokoFor(req.user);
+      return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+    }
+  }
   const invoice=code('TRX');
   const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
   const status=b.metode==='UTANG'?'UTANG':'LUNAS';
   const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
-  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',createdAt]);
+  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',createdAt,offlineClientId || null]);
   const trxId=info.lastInsertRowid;
   for (const it of items) {
     await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
@@ -537,9 +611,8 @@ app.get('/api/admin/notifications', auth, ensureRole(['admin','kasir']), async (
 });
 app.get('/api/developer/backups', auth, ensureRole(['developer']), async (req,res)=>res.json({ok:true,data:await all('SELECT * FROM app_backups ORDER BY id DESC LIMIT 50')}));
 app.post('/api/developer/backup-full', auth, ensureRole(['developer']), async (req,res)=>{
-  const file = path.join(__dirname,'backups',`backup-full-${Date.now()}.db`);
-  fs.copyFileSync(DB_FILE, file); await run('INSERT INTO app_backups(file,created_by) VALUES(?,?)',[path.basename(file),req.user.id]);
-  res.json({ok:true,file:path.basename(file)});
+  const file = await createJsonBackup(req.user.id, 'backup-full');
+  res.json({ok:true,file});
 });
 
 
@@ -691,6 +764,16 @@ app.get('/api/admin/live-dashboard', auth, ensureRole(['admin']), async (req,res
   const debts=await get("SELECT COALESCE(SUM(total-dibayar),0) hutang FROM debts WHERE toko_id=? AND status<>'LUNAS'",[tid])||{hutang:0};
   const activeShift=await all("SELECT kasir_nama, uang_awal, buka_at FROM shift_sessions WHERE toko_id=? AND status='OPEN' ORDER BY buka_at DESC",[tid]);
   res.json({ok:true,data:{omzet:sales.omzet||0,transaksi:sales.trx||0,item_terjual:items.qty||0,kas_masuk:cash.masuk||0,kas_keluar:out.keluar||0,hutang:debts.hutang||0,shift_aktif:activeShift}});
+});
+
+
+app.get('/api/sync/status', async (req,res)=>{
+  try{
+    await pool.query('SELECT 1');
+    res.json({ok:true, online:true, database:'supabase-postgres', time:new Date().toISOString()});
+  }catch(e){
+    res.status(503).json({ok:false, online:false, message:e.message});
+  }
 });
 
 initDb().then(async ()=>{
