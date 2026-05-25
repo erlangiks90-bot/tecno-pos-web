@@ -1,0 +1,26 @@
+{
+  "appId": "com.erlangtecno.tecnopos",
+  "appName": "TECNO POS",
+  "webDir": "public",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#0f172a",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0f172a"
+    },
+    "Camera": {
+      "permissions": [
+        "camera"
+      ]
+    }
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true
+  }
+}

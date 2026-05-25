@@ -1,4 +1,6 @@
 const API={user:JSON.parse(localStorage.getItem('tecno_user')||'null'),toko:JSON.parse(localStorage.getItem('tecno_toko')||'{}')};
+const TECNO_API_BASE=(window.TECNO_API_BASE||localStorage.getItem('TECNO_API_BASE')||'').replace(/\/$/,'');
+function apiUrl(path){return TECNO_API_BASE && String(path).startsWith('/api') ? TECNO_API_BASE+path : path;}
 if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.replace('/');
 const rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 function parseAppDate(v){
@@ -65,7 +67,7 @@ async function api(url,opt={}){
   const originalBody=opt.body;
   if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);
   try{
-    const r=await fetch(url,opt);
+    const r=await fetch(apiUrl(url),opt);
     const text=await r.text();
     let j={};
     try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
@@ -94,7 +96,7 @@ function enqueueCheckout(body){
   return body.offline_client_id;
 }
 function syncOneCheckout(body){
-  return fetch('/api/kasir/checkout',{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
+  return fetch(apiUrl('/api/kasir/checkout'),{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
     .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
     .then(()=>syncOfflineQueue()).catch(()=>{});
 }
@@ -108,7 +110,7 @@ async function syncOfflineQueue(){
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(item.url,{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
+      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
       if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
     }catch(e){}

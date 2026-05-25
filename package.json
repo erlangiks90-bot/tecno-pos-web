@@ -1,18 +1,31 @@
 {
   "name": "tecno-pos-pro",
-  "version": "16.0.0-hybrid-railway",
-  "description": "TECNO POS Hybrid Railway Supabase PWA Offline Queue",
+  "version": "17.0.0-apk-ready-hold-shift",
+  "description": "TECNO POS Hybrid APK Ready - Hold Shift Kasir, offline sync, camera barcode",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "cap:init": "npx cap init \"TECNO POS\" \"com.erlangtecno.tecnopos\" --web-dir=public",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "apk:prepare": "npm install && npx cap sync android"
   },
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/camera": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/status-bar": "^6.0.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
   }
 }
