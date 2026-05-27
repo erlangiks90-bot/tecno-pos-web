@@ -1,4 +1,6 @@
 const API={user:JSON.parse(localStorage.getItem('tecno_user')||'null'),toko:JSON.parse(localStorage.getItem('tecno_toko')||'{}')};
+const TECNO_API_BASE=(window.TECNO_API_BASE||localStorage.getItem('TECNO_API_BASE')||'').replace(/\/$/,'');
+function apiUrl(path){return TECNO_API_BASE && String(path).startsWith('/api') ? TECNO_API_BASE+path : path;}
 if(!API.user && !location.pathname.endsWith('/login.html') && location.pathname!=='/') location.replace('/');
 const rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 function parseAppDate(v){
@@ -20,11 +22,8 @@ function formatDateID(v){
 function prefKey(name){return API.user?.id?`tecno_${name}_${API.user.id}`:`tecno_${name}`;}
 function getUserTheme(){return localStorage.getItem(prefKey('theme'))||localStorage.getItem('tecno_theme')||API.user?.mode_tema||API.toko?.mode_tema||'eye';}
 function getUserAccent(){return localStorage.getItem(prefKey('accent'))||localStorage.getItem('tecno_accent')||API.user?.warna_tema||API.toko?.warna_tema||'blue';}
-function activeStoreId(){return API.user?.toko_id || API.toko?.id || 'global';}
-function storeKey(name){return `tecno_store_${activeStoreId()}_${name}`;}
 const qs=s=>document.querySelector(s), qsa=s=>[...document.querySelectorAll(s)];
-// MULTI TOKO FIX: semua cache offline dipisah per toko supaya produk toko A tidak muncul di kasir toko B.
-const HYBRID_QUEUE_KEY=storeKey('offline_checkout_queue_v2');
+const HYBRID_QUEUE_KEY='tecno_offline_checkout_queue_v1';
 function trxDateCode(){
   const d=new Date();
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
@@ -32,7 +31,7 @@ function trxDateCode(){
 }
 function makeLocalInvoice(){
   const day=trxDateCode();
-  const key=storeKey('local_trx_seq_'+day);
+  const key='tecno_local_trx_seq_'+day;
   const next=(Number(localStorage.getItem(key)||'0')||0)+1;
   localStorage.setItem(key,String(next));
   return `TRX-${day}-${String(next).padStart(6,'0')}`;
@@ -53,14 +52,16 @@ function numClean(v){
   const n=Number(s);
   return Number.isFinite(n)?n:0;
 }
-function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]').filter(x=>!x.toko_id || String(x.toko_id)===String(activeStoreId()))}catch(e){return []}}
+function hybridQueue(){try{return JSON.parse(localStorage.getItem(HYBRID_QUEUE_KEY)||'[]')}catch(e){return []}}
 function saveHybridQueue(q){localStorage.setItem(HYBRID_QUEUE_KEY,JSON.stringify(q));updateHybridBadge()}
 function makeOfflineReceipt(body){
   const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
   const diskon=Number(body.diskon||0), pajak=Number(body.pajak||0), biaya=Number(body.biaya||0);
   const total=subtotal-diskon+pajak+biaya, bayar=Number(body.bayar||0), kembali=Math.max(0,bayar-total);
   const id=ensureInvoice(body);
-  const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
+  const memberId=Number(body.member_id||0);
+  const poinDidapat=memberId>0?Math.floor(total/10000):0;
+  const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',member_id:memberId,poin_didapat:poinDidapat,poin_sisa:Number(body.poin_sisa||0)+poinDidapat,created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
   return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'}};
 }
 async function api(url,opt={}){
@@ -68,7 +69,7 @@ async function api(url,opt={}){
   const originalBody=opt.body;
   if(opt.body&&typeof opt.body!=='string')opt.body=JSON.stringify(opt.body);
   try{
-    const r=await fetch(url,opt);
+    const r=await fetch(apiUrl(url),opt);
     const text=await r.text();
     let j={};
     try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
@@ -80,7 +81,7 @@ async function api(url,opt={}){
       const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
       ensureInvoice(body);
       const q=hybridQueue();
-      q.push({url,method:'POST',body,user_id:API.user?.id||'',toko_id:activeStoreId(),created_at:new Date().toISOString(),status:'pending'});
+      q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
       saveHybridQueue(q);
       toast('MODE OFFLINE: transaksi tersimpan, nanti auto-sync');
       return makeOfflineReceipt(body);
@@ -93,11 +94,11 @@ function enqueueCheckout(body){
   ensureInvoice(body);
   const q=hybridQueue();
   const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
-  if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',toko_id:activeStoreId(),created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
+  if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
   return body.offline_client_id;
 }
 function syncOneCheckout(body){
-  return fetch('/api/kasir/checkout',{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
+  return fetch(apiUrl('/api/kasir/checkout'),{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
     .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
     .then(()=>syncOfflineQueue()).catch(()=>{});
 }
@@ -111,7 +112,7 @@ async function syncOfflineQueue(){
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(item.url,{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
+      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
       if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
     }catch(e){}
@@ -263,12 +264,12 @@ function modal(html){
 function closeModal(){try{window.__scannerStop?.()}catch(e){} document.querySelector('.modal')?.remove()}
 
 // ===== HYBRID PRODUCT CACHE + CAMERA BARCODE SCANNER =====
-const PRODUCT_CACHE_KEY=storeKey('product_cache_v3');
-function productCache(){try{return JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY)||'[]').filter(p=>!p.toko_id || String(p.toko_id)===String(activeStoreId()))}catch(e){return []}}
+const PRODUCT_CACHE_KEY='tecno_product_cache_v2';
+function productCache(){try{return JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY)||'[]')}catch(e){return []}}
 function saveProductCache(rows=[]){
   try{
     const map=new Map(productCache().map(p=>[String(p.id||p.barcode||p.nama),p]));
-    (rows||[]).forEach(p=>{ if(p){ if(!p.toko_id) p.toko_id=activeStoreId(); map.set(String(p.id||p.barcode||p.nama),p); } });
+    (rows||[]).forEach(p=>{ if(p) map.set(String(p.id||p.barcode||p.nama),p); });
     localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(Array.from(map.values()).slice(0,5000)));
   }catch(e){}
 }
@@ -284,7 +285,7 @@ function localProductSearch(q){
 }
 
 // ===== LOCAL-FIRST SALES, STOCK, AND SYNC REPORT =====
-const LOCAL_SALES_KEY=storeKey('local_sales_v2');
+const LOCAL_SALES_KEY='tecno_local_sales_v1';
 function localSales(){try{return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY)||'[]')}catch(e){return []}}
 function saveLocalSales(rows){try{localStorage.setItem(LOCAL_SALES_KEY,JSON.stringify((rows||[]).slice(-1000)))}catch(e){}}
 function rememberLocalSale(receipt){
@@ -292,7 +293,7 @@ function rememberLocalSale(receipt){
     const rows=localSales();
     const tr=receipt.transaction||receipt.tr||{};
     if(!rows.some(x=>x.offline_client_id===tr.offline_client_id || x.invoice===tr.invoice)){
-      rows.push({invoice:tr.invoice,offline_client_id:tr.offline_client_id,created_at:tr.created_at,customer:tr.customer,metode:tr.metode,total:tr.total,status_sync:'PENDING',items:receipt.items||[]});
+      rows.push({invoice:tr.invoice,offline_client_id:tr.offline_client_id,created_at:tr.created_at,customer:tr.customer,metode:tr.metode,total:tr.total,member_id:tr.member_id||0,poin_didapat:tr.poin_didapat||0,poin_sisa:tr.poin_sisa||0,status_sync:'PENDING',items:receipt.items||[]});
       saveLocalSales(rows);
     }
   }catch(e){}
@@ -310,7 +311,6 @@ function adjustLocalProductStock(items=[]){
       const p=rows.find(x=>String(x.id)===String(it.id||it.product_id) || (it.barcode && String(x.barcode)===String(it.barcode)));
       if(p && p.stok!==undefined){p.stok=Math.max(0,Number(p.stok||0)-Number(it.qty||0));}
     });
-    rows.forEach(p=>{if(p && !p.toko_id)p.toko_id=activeStoreId();});
     localStorage.setItem(PRODUCT_CACHE_KEY,JSON.stringify(rows));
   }catch(e){}
 }
@@ -445,37 +445,54 @@ function setupMobileBackGuard(){
   });
 }
 function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>{let v=typeof c[1]==='function'?c[1](r):(r[c[1]]??''); if(typeof c[1]==='string' && /(_at|tanggal|created_at)$/i.test(c[1]) && v) v=formatDateID(v); return `<td>${v}</td>`}).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
-function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No Transaksi: ${tr.invoice||tr.offline_client_id||'-'}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
-function escposText(toko,tr,items){
-  const line='--------------------------------';
-  const cut=(txt,w=32)=>String(txt||'').slice(0,w);
-  const money=n=>Number(n||0).toLocaleString('id-ID');
-  const row=(l,r)=>cut(l,20).padEnd(20,' ')+cut(r,12).padStart(12,' ');
-  let out=[];
-  out.push((toko.nama_toko||'NAMA TOKO').toUpperCase());
-  if(toko.alamat)out.push(cut(toko.alamat));
-  if(toko.no_hp)out.push(cut(toko.no_hp));
-  out.push(line);
-  out.push('No Transaksi: '+(tr.invoice||tr.offline_client_id||'-'));
-  out.push('Kasir: '+(tr.kasir||API.user?.nama||'-'));
-  out.push(formatDateID(tr.created_at));
-  out.push(line);
-  items.forEach(i=>{out.push(cut(i.nama));out.push(row(`${i.qty} x ${money(i.harga)}`,money(i.subtotal)));});
-  out.push(line);
-  out.push(row('Subtotal',money(tr.subtotal)));
-  out.push(row('Diskon',money(tr.diskon)));
-  out.push(row('Pajak',money(tr.pajak)));
-  out.push(row('TOTAL',money(tr.total)));
-  out.push(row(tr.metode,money(tr.bayar)));
-  out.push(row('Kembali',money(tr.kembali)));
-  out.push(line);
-  out.push(toko.footer_struk||'Terima kasih');
-  if((toko.paket||'GRATIS')==='GRATIS')out.push('Powered by Erlang Tecno');
-  out.push('\n\n\n');
-  return out.join('\n');
+function receiptHTML(toko,tr,items){
+  const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';
+  const isMember=Number(tr.member_id||0)>0 && String(tr.customer||'').trim() && !/^umum|pelanggan umum$/i.test(String(tr.customer||''));
+  const memberLine=isMember?`<div>Member: ${tr.customer}</div><div>Poin +: ${Number(tr.poin_didapat||0)}</div>${tr.poin_sisa!==undefined?`<div>Total Poin: ${Number(tr.poin_sisa||0)}</div>`:''}`:'';
+  return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No Transaksi: ${tr.invoice||tr.offline_client_id||'-'}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div>${memberLine?'<hr>'+memberLine:''}<hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`
 }
 async function printBluetoothThermal(toko,tr,items){
-  if(!('bluetooth' in navigator)){alert('Browser ini belum mendukung Web Bluetooth. Di HP Android coba buka lewat Chrome, atau pakai tombol Print HP.');return}
+  const text = escposText(toko,tr,items);
+
+  // APK Native Android: printer thermal Bluetooth Classic/SPP seperti RPP02N
+  if(window.bluetoothSerial){
+    try{
+      window.bluetoothSerial.list(function(devices){
+        if(!devices || !devices.length){
+          alert('Printer belum dipairing. Pair RPP02N dulu di Bluetooth HP. PIN biasanya 0000 / 1234.');
+          return;
+        }
+        const printer = devices.find(d=>{
+          const n=(d.name||'').toLowerCase();
+          return n.includes('rpp') || n.includes('printer') || n.includes('thermal') || n.includes('pos');
+        }) || devices[0];
+
+        window.bluetoothSerial.connect(printer.address, function(){
+          const payload = '\x1B\x40' + text + '\n\n\n\x1D\x56\x00';
+          window.bluetoothSerial.write(payload, function(){
+            toast('Struk dikirim ke printer: '+(printer.name||printer.address));
+            window.bluetoothSerial.disconnect();
+          }, function(err){
+            alert('Gagal cetak: '+JSON.stringify(err));
+          });
+        }, function(err){
+          alert('Gagal konek printer: '+JSON.stringify(err)+'\nPastikan printer sudah ON dan sudah dipairing.');
+        });
+      }, function(err){
+        alert('Gagal membaca daftar Bluetooth: '+JSON.stringify(err));
+      });
+      return;
+    }catch(e){
+      alert('Bluetooth Native error: '+e.message);
+      return;
+    }
+  }
+
+  // Fallback WEB: hanya untuk BLE, bukan RPP02N Classic
+  if(!('bluetooth' in navigator)){
+    alert('Bluetooth native belum aktif di APK. Pastikan plugin cordova-plugin-bluetooth-serial sudah terpasang, lalu npx cap sync android dan build APK ulang.');
+    return;
+  }
   try{
     const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:['0000ffe0-0000-1000-8000-00805f9b34fb','49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2']});
     const server=await device.gatt.connect();
@@ -486,12 +503,14 @@ async function printBluetoothThermal(toko,tr,items){
       writable=chars.find(c=>c.properties.write||c.properties.writeWithoutResponse);
       if(writable)break;
     }
-    if(!writable)throw new Error('Printer ditemukan, tapi channel tulis tidak ditemukan. Banyak printer thermal Bluetooth classic/SPP tidak bisa lewat browser, harus APK native.');
+    if(!writable)throw new Error('Printer ditemukan, tapi channel tulis tidak ditemukan. Untuk RPP02N pakai APK native Bluetooth Serial.');
     const enc=new TextEncoder();
-    const bytes=[...new Uint8Array([0x1b,0x40]),...enc.encode(escposText(toko,tr,items)),...new Uint8Array([0x1d,0x56,0x00])];
+    const bytes=[...new Uint8Array([0x1b,0x40]),...enc.encode(text),...new Uint8Array([0x1d,0x56,0x00])];
     for(let i=0;i<bytes.length;i+=160){await writable.writeValue(new Uint8Array(bytes.slice(i,i+160)))}
     toast('Struk dikirim ke thermal Bluetooth');
-  }catch(e){alert('Bluetooth gagal: '+e.message+'\n\nSolusi aman: pakai tombol Print HP/Chrome, atau nanti jadikan APK native Bluetooth ESC/POS untuk printer RPP02N/classic.');}
+  }catch(e){
+    alert('Bluetooth gagal: '+e.message);
+  }
 }
 function printReceipt(toko,tr,items){window.LAST_RECEIPT={toko,tr,items};let m=modal(`<div class="modal-head no-print"><b>Cetak Struk Thermal</b><button class="x" onclick="closeModal()">X</button></div>${receiptHTML(toko,tr,items)}<div class="no-print receipt-actions"><button class="btn primary" onclick="window.print()">Print HP/Chrome</button><button class="btn ok" onclick="printBluetoothThermal(window.LAST_RECEIPT.toko,window.LAST_RECEIPT.tr,window.LAST_RECEIPT.items)">Bluetooth Thermal</button><button class="btn" onclick="navigator.share?navigator.share({title:'Struk',text:escposText(window.LAST_RECEIPT.toko,window.LAST_RECEIPT.tr,window.LAST_RECEIPT.items)}):alert(escposText(window.LAST_RECEIPT.toko,window.LAST_RECEIPT.tr,window.LAST_RECEIPT.items))">Share Teks</button><button class="btn" onclick="closeModal()">Tutup</button></div><p class="no-print side-sub">Catatan: tombol Bluetooth langsung bekerja untuk printer BLE. Printer thermal Bluetooth classic seperti sebagian RPP02N biasanya perlu Print HP/Chrome atau APK native.</p>`)}
 
@@ -506,3 +525,17 @@ function openChangePassword(){
   changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.replace('/')},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}
+
+
+// === ADMIN: HAPUS PRODUK ===
+async function hapusProduk(id,nama='produk'){
+  if(!id) return alert('ID produk tidak ditemukan');
+  if(!confirm('Hapus '+nama+'? Produk akan hilang dari admin dan kasir toko ini.')) return;
+  try{
+    await api('/api/admin/products/'+id,{method:'DELETE'});
+    try{saveProductCache(productCache().filter(p=>String(p.id)!==String(id)));}catch(e){}
+    toast('Produk berhasil dihapus');
+    if(typeof loadProducts==='function') loadProducts();
+  }catch(e){alert(e.message||'Gagal hapus produk')}
+}
+window.hapusProduk=hapusProduk;
