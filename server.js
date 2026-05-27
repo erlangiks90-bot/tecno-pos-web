@@ -196,8 +196,6 @@ async function migrate() {
   `);
 
   try { await exec("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS offline_client_id TEXT UNIQUE"); } catch(e) { console.log('offline_client_id skip', e.message); }
-  try { await exec("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS poin_didapat INTEGER DEFAULT 0"); } catch(e) { console.log('poin_didapat skip', e.message); }
-  try { await exec("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS poin_sisa INTEGER DEFAULT 0"); } catch(e) { console.log('poin_sisa skip', e.message); }
   try { await exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'"); } catch(e) { console.log('pin skip', e.message); }
 
   let toko = await get('SELECT * FROM tokos LIMIT 1');
@@ -483,7 +481,7 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
   if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
   const offlineClientId = String(b.offline_client_id || '').trim();
   if (offlineClientId) {
-    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=? AND tr.toko_id=?', [offlineClientId, req.user.toko_id]);
+    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
     if (old) {
       const toko=await tokoFor(req.user);
       return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
@@ -495,19 +493,9 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
   const status=b.metode==='UTANG'?'UTANG':'LUNAS';
-  const memberId=Number(b.member_id||0);
-  let poinDidapat=0, poinSisa=0;
-  if(memberId>0){
-    const mem=await get('SELECT * FROM members WHERE id=? AND toko_id=?',[memberId,req.user.toko_id]);
-    if(mem){
-      poinDidapat=Math.floor(total/10000);
-      poinSisa=Number(mem.poin||0)+poinDidapat;
-      await run('UPDATE members SET poin=? WHERE id=? AND toko_id=?',[poinSisa,memberId,req.user.toko_id]);
-    }
-  }
   const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
-  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId || null,poinDidapat,poinSisa]);
+  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',createdAt,offlineClientId || null]);
   const trxId=info.lastInsertRowid;
   for (const it of items) {
     await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);

@@ -96,21 +96,11 @@ async function checkout(){
   if(!SHIFT_OPEN){alert('Buka Kas/Shift dulu sebelum transaksi');openShiftModal();return;}
   let c=calc();
   let items=CART.map(x=>({...x,harga:priceOf(x)}));
-  const memberId=Number(memberSelect.value||0);
-  const selectedMember=MEMBERS.find(m=>Number(m.id)===memberId);
-  const typed=(customer.value||'').trim();
-  const customerName=memberId>0?(selectedMember?.nama||memberSelect.options[memberSelect.selectedIndex]?.text||typed): (typed||'Umum');
-  let body={items,customer:customerName,member_id:memberId,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||'',client_time:clientTimeJakartaSQL(),poin_sisa:selectedMember?.poin||0};
+  let body={items,customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',member_id:memberSelect.value,diskon:c.d,pajak:pajak.value,biaya:biaya.value,bayar:bayar.value,metode:metode.value,voucher:voucher.options[voucher.selectedIndex]?.text||'',client_time:clientTimeJakartaSQL()};
   ensureInvoice(body);
-  // TRUE HYBRID: transaksi langsung masuk riwayat lokal, stok lokal berkurang, sync online jalan di belakang.
+  // POS cepat: struk langsung keluar dari data lokal, sync online jalan di belakang.
   enqueueCheckout(body);
   let j=makeOfflineReceipt(body);
-  if(memberId>0 && selectedMember){
-    const add=Math.floor(Number(j.transaction.total||0)/10000);
-    selectedMember.poin=Number(selectedMember.poin||0)+add;
-    j.transaction.poin_didapat=add;
-    j.transaction.poin_sisa=selectedMember.poin;
-  }
   window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
   printReceipt(j.toko,j.transaction,j.items);
   rememberLocalSale(j);
@@ -118,28 +108,13 @@ async function checkout(){
   clearCart();
   toast('Transaksi tersimpan lokal, sync online berjalan otomatis');
   syncOneCheckout(body);
-  setTimeout(()=>{loadTransactions();syncProductCache();loadMembers();},1200);
+  setTimeout(()=>{loadTransactions();syncProductCache();},1200);
 }
-async function loadTransactions(){
-  let remote=[];
-  try{let j=await api('/api/admin/transactions');remote=Array.isArray(j.data)?j.data:[]}catch(e){toast('Mode offline: riwayat dari lokal')}
-  const local=localSales().slice().reverse().map(x=>({...x,id:x.id||x.offline_client_id,status:x.status_sync||'PENDING',local:true}));
-  const map=new Map();
-  [...local,...remote].forEach(r=>{map.set(String(r.invoice||r.offline_client_id||r.id),r)});
-  const rows=[...map.values()].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
-  let html=table(rows,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status',r=>r.local?`<span class="badge warn">${r.status||'PENDING'}</span>`:(r.status||'LUNAS')],['Aksi',r=>r.local?`<button class="btn" onclick="reprintLocal('${r.offline_client_id||r.invoice}')">Cetak Lokal</button>`:`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);
-  historyTable.innerHTML=html;loadHolds()
-}
+async function loadTransactions(){let j=await api('/api/admin/transactions');let html=table(j.data,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status','status'],['Aksi',r=>`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);historyTable.innerHTML=html;loadHolds()}
 async function loadHolds(){let rows=[];try{let j=await api('/api/kasir/holds');rows=Array.isArray(j.data)?j.data:[]}catch(e){}rows=[...localHolds(),...rows];holdTable.innerHTML=table(rows,[['Kode','kode'],['Customer','customer'],['Tanggal','created_at'],['Aksi',r=>`<button class="btn" onclick='loadHold("${r.id}",${JSON.stringify(r.items_json||JSON.stringify(r.items||[]))},${r.local?'true':'false'})'>Buka</button> <button class="btn danger" onclick="delHold("${r.id}",${r.local?'true':'false'})">Hapus</button>`]])}
 async function loadHold(id,json,local=false){CART=typeof json==='string'?JSON.parse(json):json;renderCart();showSection('kasirPage');await delHold(id,local,false)}async function delHold(id,local=false,msg=true){if(local||String(id).startsWith('local-')){saveLocalHolds(localHolds().filter(x=>String(x.id)!==String(id)));}else{await api('/api/kasir/holds/'+id,{method:'DELETE'});}if(msg)toast('Hold dihapus');loadHolds()}
 async function reprint(id){let j=await api('/api/receipt/'+id);printReceipt(j.toko,j.transaction,j.items)}
-function reprintLocal(key){
-  const row=localSales().find(x=>String(x.offline_client_id||x.invoice)===String(key));
-  if(!row) return alert('Riwayat lokal tidak ditemukan');
-  const tr={invoice:row.invoice,offline_client_id:row.offline_client_id,created_at:row.created_at,customer:row.customer,metode:row.metode,total:row.total,subtotal:row.subtotal||row.total,diskon:row.diskon||0,pajak:row.pajak||0,biaya:row.biaya||0,bayar:row.bayar||row.total,kembali:row.kembali||0,status:row.status||'LUNAS',member_id:row.member_id||0,poin_didapat:row.poin_didapat||0,poin_sisa:row.poin_sisa||0,kasir:API.user.nama};
-  printReceipt(API.toko||{nama_toko:'TECNO POS'},tr,row.items||[]);
-}
-async function loadMembers(){try{let j=await api('/api/admin/members');MEMBERS=j.data||[];localStorage.setItem(storeKey('member_cache_v1'),JSON.stringify(MEMBERS));}catch(e){MEMBERS=JSON.parse(localStorage.getItem(storeKey('member_cache_v1'))||'[]')}memberSelect.innerHTML='<option value="0">Umum</option>'+MEMBERS.map(m=>`<option value="${m.id}">${m.nama} - ${m.hp||''} (${m.poin||0} poin)</option>`).join('');memberTable.innerHTML=table(MEMBERS,[['Nama','nama'],['HP','hp'],['Poin','poin']])}
+async function loadMembers(){let j=await api('/api/admin/members');MEMBERS=j.data;memberSelect.innerHTML='<option value="0">Pelanggan umum</option>'+MEMBERS.map(m=>`<option value="${m.id}">${m.nama} - ${m.hp||''}</option>`).join('');memberTable.innerHTML=table(MEMBERS,[['Nama','nama'],['HP','hp'],['Poin','poin']])}
 async function loadPromos(){let j=await api('/api/admin/promos');PROMOS=j.data;voucher.innerHTML='<option value="">Tanpa voucher</option>'+PROMOS.filter(p=>p.status==='AKTIF').map(p=>`<option value="${p.id}">${p.kode} - ${p.nama}</option>`).join('');voucherPopup.innerHTML=voucher.innerHTML;updateExtraInfo()}
 async function loadAI(){let j=await api('/api/ai/insight');aiText.textContent=j.answer}
 function askLocalAI(){let q=aiInput.value.toLowerCase();let bayar=(q.match(/\d+/)||[])[0];let tot=calc().tot;if(q.includes('kembalian')&&bayar){aiAnswer.textContent='Kembalian: '+rp(Number(bayar)-tot)}else aiAnswer.textContent='Gunakan tombol Tanya AI untuk ringkasan toko, atau ketik: hitung kembalian 100000.'}

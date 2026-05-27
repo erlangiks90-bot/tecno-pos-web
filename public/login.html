@@ -6,19 +6,6 @@ const $=s=>document.querySelector(s);
 const u=JSON.parse(localStorage.getItem('tecno_user')||'null');
 if(u && (!u.remember_until || new Date(u.remember_until)>new Date())) location.replace(u.role==='developer'?'/developer.html':u.role==='admin'?'/admin.html':'/kasir.html');
 
-function offlineAccounts(){try{return JSON.parse(localStorage.getItem('tecno_offline_accounts_v1')||'[]')}catch(e){return []}}
-function saveOfflineAccount(username,password,j){
-  const rows=offlineAccounts().filter(x=>String(x.username).toLowerCase()!==String(username).toLowerCase());
-  rows.push({username,password,user:j.user,toko:j.toko||{},saved_at:new Date().toISOString()});
-  localStorage.setItem('tecno_offline_accounts_v1',JSON.stringify(rows.slice(-20)));
-}
-function offlineLogin(username,password){
-  const acc=offlineAccounts().find(x=>String(x.username).toLowerCase()===String(username).toLowerCase() && String(x.password)===String(password));
-  if(!acc) throw new Error('Offline login belum tersedia untuk akun ini. Login online dulu minimal 1 kali.');
-  localStorage.setItem('tecno_user',JSON.stringify(acc.user));
-  localStorage.setItem('tecno_toko',JSON.stringify(acc.toko||{}));
-  return acc.user;
-}
-$('#loginForm').onsubmit=async e=>{e.preventDefault();$('#msg').classList.add('hidden');const username=$('#username').value.trim();const password=$('#password').value;try{const r=await fetch(tecnoApiUrl('/api/login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});const text=await r.text();let j={};try{j=JSON.parse(text)}catch(_){throw new Error('Server tidak membalas JSON')};if(!j.ok)throw new Error(j.message);if(!$('#remember').checked){delete j.user.remember_until;} localStorage.setItem('tecno_user',JSON.stringify(j.user));localStorage.setItem('tecno_toko',JSON.stringify(j.toko||{}));saveOfflineAccount(username,password,j);location.replace(j.user.role==='developer'?'developer.html':j.user.role==='admin'?'admin.html':'kasir.html')}catch(err){try{const user=offlineLogin(username,password);alert('MODE OFFLINE: masuk memakai akun tersimpan lokal');location.replace(user.role==='developer'?'developer.html':user.role==='admin'?'admin.html':'kasir.html')}catch(offErr){$('#msg').textContent=(navigator.onLine?err.message:offErr.message)||'Login gagal';$('#msg').classList.remove('hidden')}}};
+$('#loginForm').onsubmit=async e=>{e.preventDefault();$('#msg').classList.add('hidden');try{const r=await fetch(tecnoApiUrl('/api/login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#username').value.trim(),password:$('#password').value})});const j=await r.json();if(!j.ok)throw new Error(j.message);if(!$('#remember').checked){delete j.user.remember_until;} localStorage.setItem('tecno_user',JSON.stringify(j.user));localStorage.setItem('tecno_toko',JSON.stringify(j.toko||{}));location.replace(j.user.role==='developer'?'developer.html':j.user.role==='admin'?'admin.html':'kasir.html')}catch(err){$('#msg').textContent=err.message||'Login gagal';$('#msg').classList.remove('hidden')}};
 function togglePassword(){const p=document.getElementById('password');p.type=p.type==='password'?'text':'password'}
 </script></body></html>
