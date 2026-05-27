@@ -31,10 +31,11 @@ function trxDateCode(){
 }
 function makeLocalInvoice(){
   const day=trxDateCode();
-  const key='tecno_local_trx_seq_'+day;
+  const storePart=String(API.toko?.id||API.user?.toko_id||API.user?.id||'0').replace(/\D/g,'')||'0';
+  const key='tecno_local_trx_seq_'+storePart+'_'+day;
   const next=(Number(localStorage.getItem(key)||'0')||0)+1;
   localStorage.setItem(key,String(next));
-  return `TRX-${day}-${String(next).padStart(6,'0')}`;
+  return `TRX-${storePart}-${day}-${String(next).padStart(6,'0')}`;
 }
 function ensureInvoice(body){
   if(!body.invoice || String(body.invoice).startsWith('OFF-')) body.invoice=makeLocalInvoice();
@@ -62,7 +63,7 @@ function makeOfflineReceipt(body){
   const memberId=Number(body.member_id||0);
   const poinDidapat=memberId>0?Math.floor(total/10000):0;
   const tr={id:-Date.now(),invoice:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:body.metode==='UTANG'?'UTANG':'LUNAS',member_id:memberId,poin_didapat:poinDidapat,poin_sisa:Number(body.poin_sisa||0)+poinDidapat,created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir',offline_client_id:id};
-  return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'}};
+  return {ok:true,offline:true,message:'Transaksi disimpan offline. Akan sync otomatis saat internet aktif.',transaction:tr,items:(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)})),toko:API.toko||{nama_toko:'TECNO POS'},raw_body:body};
 }
 async function api(url,opt={}){
   opt.headers=Object.assign({'Content-Type':'application/json','x-user-id':API.user?.id||''},opt.headers||{});
@@ -103,8 +104,52 @@ function syncOneCheckout(body){
     .then(()=>syncOfflineQueue()).catch(()=>{});
 }
 
+
+function saleToCheckoutBody(sale){
+  const items=(sale.items||[]).map(it=>({
+    id: it.product_id || it.id || 0,
+    nama: it.nama || it.name || 'Item',
+    qty: Number(it.qty||1),
+    harga: Number(it.harga||0)
+  }));
+  const subtotal=items.reduce((a,b)=>a+(Number(b.qty||0)*Number(b.harga||0)),0);
+  return {
+    invoice: sale.invoice || sale.offline_client_id || makeLocalInvoice(),
+    offline_client_id: sale.offline_client_id || sale.invoice || makeLocalInvoice(),
+    items,
+    customer: sale.customer || 'Umum',
+    member_id: Number(sale.member_id||0),
+    diskon: Number(sale.diskon||0),
+    pajak: Number(sale.pajak||0),
+    biaya: Number(sale.biaya||0),
+    bayar: Number(sale.bayar||sale.total||subtotal),
+    metode: sale.metode || 'TUNAI',
+    voucher: sale.voucher || '',
+    client_time: sale.created_at || clientTimeJakartaSQL?.() || new Date().toISOString(),
+    poin_sisa: Number(sale.poin_sisa||0)
+  };
+}
+function rebuildQueueFromLocalSales(){
+  const q=hybridQueue();
+  const keyOf=x=>String(x?.body?.offline_client_id||x?.body?.invoice||'');
+  const exist=new Set(q.filter(x=>x.status!=='synced').map(keyOf));
+  let changed=false;
+  localSales().forEach(sale=>{
+    const st=String(sale.status_sync||'PENDING').toUpperCase();
+    const id=String(sale.offline_client_id||sale.invoice||'');
+    if(st!=='SYNCED' && id && !exist.has(id)){
+      const body=sale.raw_body || saleToCheckoutBody(sale);
+      q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending',rebuilt:true});
+      exist.add(id); changed=true;
+    }
+  });
+  if(changed) saveHybridQueue(q);
+  return changed;
+}
+
 async function syncOfflineQueue(){
   if(!API.user) return;
+  rebuildQueueFromLocalSales();
   let q=hybridQueue();
   if(!q.length){updateHybridBadge();return;}
   if(!navigator.onLine){updateHybridBadge();return;}
@@ -112,14 +157,32 @@ async function syncOfflineQueue(){
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
-      const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
-      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
-    }catch(e){}
+      item.url=item.url||'/api/kasir/checkout';
+      item.method=item.method||'POST';
+      item.body=item.body||{};
+      ensureInvoice(item.body);
+      const r=await fetch(apiUrl(item.url),{method:item.method,headers:{'Content-Type':'application/json','x-user-id':API.user.id},body:JSON.stringify(item.body)});
+      const txt=await r.text();
+      let j={};
+      try{j=txt?JSON.parse(txt):{};}catch(e){j={ok:false,message:'Server balas bukan JSON'};}
+      if(r.ok && j.ok){
+        item.status='synced';
+        item.synced_at=new Date().toISOString();
+        try{markLocalSaleSynced(item.body?.offline_client_id||item.body?.invoice)}catch(e){}
+        changed=true;
+      }else{
+        item.last_error=j.message||('HTTP '+r.status);
+        item.last_try=new Date().toISOString();
+      }
+    }catch(e){
+      item.last_error=e.message||'Gagal koneksi';
+      item.last_try=new Date().toISOString();
+    }
   }
   const before=q.length;
   q=q.filter(x=>x.status!=='synced');
-  if(changed){saveHybridQueue(q);toast(before-q.length+' transaksi offline berhasil sync ke online')}
+  saveHybridQueue(q);
+  if(changed) toast((before-q.length)+' transaksi berhasil masuk admin/online');
   updateHybridBadge();
 }
 function updateHybridBadge(){
@@ -293,7 +356,7 @@ function rememberLocalSale(receipt){
     const rows=localSales();
     const tr=receipt.transaction||receipt.tr||{};
     if(!rows.some(x=>x.offline_client_id===tr.offline_client_id || x.invoice===tr.invoice)){
-      rows.push({invoice:tr.invoice,offline_client_id:tr.offline_client_id,created_at:tr.created_at,customer:tr.customer,metode:tr.metode,total:tr.total,member_id:tr.member_id||0,poin_didapat:tr.poin_didapat||0,poin_sisa:tr.poin_sisa||0,status_sync:'PENDING',items:receipt.items||[]});
+      rows.push({invoice:tr.invoice,offline_client_id:tr.offline_client_id,created_at:tr.created_at,customer:tr.customer,metode:tr.metode,total:tr.total,subtotal:tr.subtotal||0,diskon:tr.diskon||0,pajak:tr.pajak||0,biaya:tr.biaya||0,bayar:tr.bayar||tr.total||0,kembali:tr.kembali||0,status:tr.status||'LUNAS',member_id:tr.member_id||0,poin_didapat:tr.poin_didapat||0,poin_sisa:tr.poin_sisa||0,status_sync:'PENDING',items:receipt.items||[],raw_body:receipt.raw_body||null});
       saveLocalSales(rows);
     }
   }catch(e){}

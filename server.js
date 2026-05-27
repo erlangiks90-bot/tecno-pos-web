@@ -483,7 +483,7 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
   if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
   const offlineClientId = String(b.offline_client_id || '').trim();
   if (offlineClientId) {
-    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
+    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=? AND tr.toko_id=?', [offlineClientId, req.user.toko_id]);
     if (old) {
       const toko=await tokoFor(req.user);
       return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
