@@ -442,7 +442,7 @@ app.post('/api/admin/kasir/:id/reset-password', auth, ensureRole(['admin']), asy
 
 app.get('/api/admin/transactions', auth, ensureRole(['admin','kasir']), async (req,res)=>{
   const mine = req.user.role === 'kasir' ? ' AND kasir_id='+Number(req.user.id) : '';
-  res.json({ ok:true, data: await all(`SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.toko_id=? ${mine} ORDER BY tr.id DESC LIMIT 200`, [req.user.toko_id]) });
+  res.json({ ok:true, data: await all(`SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.toko_id=? ${mine} ORDER BY tr.created_at DESC, tr.id DESC LIMIT 1000`, [req.user.toko_id]) });
 });
 app.get('/api/admin/debts', auth, ensureRole(['admin']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM debts WHERE toko_id=? ORDER BY id DESC',[req.user.toko_id]) }));
 
@@ -472,52 +472,101 @@ app.post('/api/kasir/hold', auth, ensureRole(['kasir']), async (req,res)=>{
 app.get('/api/kasir/holds', auth, ensureRole(['kasir']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM holds WHERE toko_id=? AND kasir_id=? ORDER BY id DESC',[req.user.toko_id,req.user.id]) }));
 app.delete('/api/kasir/holds/:id', auth, ensureRole(['kasir']), async (req,res)=>{await run('DELETE FROM holds WHERE id=? AND toko_id=? AND kasir_id=?',[req.params.id,req.user.toko_id,req.user.id]);res.json({ok:true});});
 app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
-  // Jika kasir belum buka kas, sistem buka otomatis Rp0 agar transaksi tidak macet.
-  // Kasir tetap disarankan Buka Kas manual supaya laporan tutup kas lebih rapi.
-  if(!await currentShift(req.user.toko_id, req.user.id)){
-    try{ await run('INSERT INTO shift_sessions(toko_id,kasir_id,kasir_nama,uang_awal,catatan_buka) VALUES(?,?,?,?,?)',[req.user.toko_id,req.user.id,req.user.nama,0,'AUTO BUKA KAS']); }catch(e){}
-  }
-  const sec=await ensureSec(req.user.toko_id);
-  if(sec.mode_toko==='TUTUP') return res.status(403).json({ok:false,message:'Toko sedang mode tutup. Kasir tidak bisa transaksi.'});
-  const b=req.body; const items=b.items||[];
-  if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
-  const offlineClientId = String(b.offline_client_id || '').trim();
-  if (offlineClientId) {
-    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=? AND tr.toko_id=?', [offlineClientId, req.user.toko_id]);
-    if (old) {
-      const toko=await tokoFor(req.user);
-      return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+  try{
+    // Jika kasir belum buka kas, sistem buka otomatis Rp0 agar transaksi tidak macet.
+    if(!await currentShift(req.user.toko_id, req.user.id)){
+      try{ await run('INSERT INTO shift_sessions(toko_id,kasir_id,kasir_nama,uang_awal,catatan_buka) VALUES(?,?,?,?,?)',[req.user.toko_id,req.user.id,req.user.nama,0,'AUTO BUKA KAS']); }catch(e){}
     }
-  }
-  let invoice=String(b.invoice || '').trim();
-  if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
-  const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
-  const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
-  const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
-  const status=b.metode==='UTANG'?'UTANG':'LUNAS';
-  const memberId=Number(b.member_id||0);
-  let poinDidapat=0, poinSisa=0;
-  if(memberId>0){
-    const mem=await get('SELECT * FROM members WHERE id=? AND toko_id=?',[memberId,req.user.toko_id]);
-    if(mem){
-      poinDidapat=Math.floor(total/10000);
-      poinSisa=Number(mem.poin||0)+poinDidapat;
-      await run('UPDATE members SET poin=? WHERE id=? AND toko_id=?',[poinSisa,memberId,req.user.toko_id]);
+
+    const sec=await ensureSec(req.user.toko_id);
+    if(sec.mode_toko==='TUTUP') return res.status(403).json({ok:false,message:'Toko sedang mode tutup. Kasir tidak bisa transaksi.'});
+
+    const b=req.body || {};
+    const items=b.items||[];
+    if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
+
+    // WAJIB unik agar sync offline tidak membuat Railway crash.
+    const offlineClientId = String(
+      b.offline_client_id ||
+      b.client_id ||
+      b.local_id ||
+      ('OFF-' + req.user.toko_id + '-' + req.user.id + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,8))
+    ).trim();
+
+    // Cek global, jangan pakai toko_id, karena unique constraint global di database.
+    if (offlineClientId) {
+      const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
+      if (old) {
+        const toko=await tokoFor(req.user);
+        return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+      }
     }
+
+    let invoice=String(b.invoice || '').trim();
+    if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
+
+    const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
+    const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
+    const total=subtotal-diskon+pajak+biaya;
+    const bayar=rupiah(b.bayar);
+    const kembali=Math.max(0,bayar-total);
+    const status=b.metode==='UTANG'?'UTANG':'LUNAS';
+    const memberId=Number(b.member_id||0);
+
+    let poinDidapat=0, poinSisa=0;
+    if(memberId>0){
+      const mem=await get('SELECT * FROM members WHERE id=? AND toko_id=?',[memberId,req.user.toko_id]);
+      if(mem){
+        poinDidapat=Math.floor(total/10000);
+        poinSisa=Number(mem.poin||0)+poinDidapat;
+        await run('UPDATE members SET poin=? WHERE id=? AND toko_id=?',[poinSisa,memberId,req.user.toko_id]);
+      }
+    }
+
+    const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
+
+    let trxId = 0;
+    for(let attempt=0; attempt<3; attempt++){
+      try{
+        const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId,poinDidapat,poinSisa]);
+        trxId=info.lastInsertRowid;
+        break;
+      }catch(e){
+        // Jika transaksi offline sudah pernah terkirim, jangan crash. Balikkan transaksi lama.
+        if(String(e.constraint||'') === 'transactions_offline_client_id_key' || String(e.message||'').includes('transactions_offline_client_id_key')){
+          const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
+          if(old){
+            const toko=await tokoFor(req.user);
+            return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+          }
+        }
+        // Jika invoice tabrakan, buat invoice baru lalu ulangi.
+        if(String(e.constraint||'') === 'transactions_invoice_key' || String(e.message||'').includes('transactions_invoice_key')){
+          invoice=code('TRX');
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    if(!trxId) return res.status(500).json({ok:false,message:'Gagal menyimpan transaksi'});
+
+    for (const it of items) {
+      await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
+      if (it.id) await run('UPDATE products SET stok=stok-? WHERE id=? AND toko_id=?',[Number(it.qty),it.id,req.user.toko_id]);
+    }
+
+    if (status==='UTANG') await run('INSERT INTO debts (toko_id,transaction_id,nama_pelanggan,total,status) VALUES (?,?,?,?,?)',[req.user.toko_id,trxId,b.customer||'Pelanggan',total,'BELUM LUNAS']);
+
+    const trx=await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.id=?',[trxId]);
+    const toko=await tokoFor(req.user);
+    await log(req.user,'CHECKOUT',invoice);
+    res.json({ok:true, transaction:trx, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[trxId]), toko});
+  }catch(err){
+    console.error('CHECKOUT ERROR:', err.message || err);
+    res.status(500).json({ok:false,message:'Transaksi gagal disimpan: '+(err.message||err)});
   }
-  const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
-  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId || null,poinDidapat,poinSisa]);
-  const trxId=info.lastInsertRowid;
-  for (const it of items) {
-    await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
-    if (it.id) await run('UPDATE products SET stok=stok-? WHERE id=? AND toko_id=?',[Number(it.qty),it.id,req.user.toko_id]);
-  }
-  if (status==='UTANG') await run('INSERT INTO debts (toko_id,transaction_id,nama_pelanggan,total,status) VALUES (?,?,?,?,?)',[req.user.toko_id,trxId,b.customer||'Pelanggan',total,'BELUM LUNAS']);
-  const trx=await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.id=?',[trxId]);
-  const toko=await tokoFor(req.user);
-  await log(req.user,'CHECKOUT',invoice);
-  res.json({ok:true, transaction:trx, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[trxId]), toko});
 });
 
 app.post('/api/change-password', auth, async (req,res)=>{
@@ -837,22 +886,3 @@ initDb().then(async ()=>{
 
 
 
-
-
-// ===== TECNO POS FIX =====
-async function safeUpsertTransaction(supabase, trx){
-  const payload = {
-    ...trx,
-    offline_client_id:
-      trx.offline_client_id ||
-      (Date.now().toString() + Math.random().toString(36).slice(2,8))
-  };
-
-  return await supabase
-    .from("transactions")
-    .upsert(payload,{
-      onConflict:"offline_client_id",
-      ignoreDuplicates:true
-    });
-}
-// ===== END FIX =====
