@@ -837,3 +837,22 @@ initDb().then(async ()=>{
 
 
 
+
+
+// ===== TECNO POS FIX =====
+async function safeUpsertTransaction(supabase, trx){
+  const payload = {
+    ...trx,
+    offline_client_id:
+      trx.offline_client_id ||
+      (Date.now().toString() + Math.random().toString(36).slice(2,8))
+  };
+
+  return await supabase
+    .from("transactions")
+    .upsert(payload,{
+      onConflict:"offline_client_id",
+      ignoreDuplicates:true
+    });
+}
+// ===== END FIX =====
