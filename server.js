@@ -23,11 +23,6 @@ function nowJakartaSQL(){
   }).format(new Date()).replace(' ', 'T');
   return parts.replace('T',' ');
 }
-function todayJakartaDate(){
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(new Date());
-}
 function toPgSql(sql){
   let i=0;
   let out='';
@@ -107,18 +102,6 @@ function code(prefix) {
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   const seq=Date.now().toString(36).toUpperCase().slice(-5)+Math.floor(Math.random()*999).toString().padStart(3,'0');
   return `${prefix}-${y}${m}${day}-${seq}`;
-}
-async function uniqueInvoice(tokoId, preferred='') {
-  let inv = String(preferred || '').trim();
-  if (!inv || inv.startsWith('OFF-') || inv === 'OFF') inv = code('TRX');
-
-  // Cegah invoice dobel ketika transaksi offline disync bersamaan.
-  for (let i = 0; i < 5; i++) {
-    const exists = await get('SELECT id FROM transactions WHERE invoice=? AND toko_id=?', [inv, tokoId]);
-    if (!exists) return inv;
-    inv = code('TRX');
-  }
-  return code('TRX');
 }
 function safeNum(v){
   if(typeof v==='number') return Number.isFinite(v)?v:0;
@@ -382,8 +365,8 @@ app.post('/api/developer/backup', auth, ensureRole(['developer']), async (req,re
 
 app.get('/api/admin/summary', auth, ensureRole(['admin']), async (req,res)=>{
   const tid=req.user.toko_id; const toko=await tokoFor(req.user);
-  // FIX AMAN: jangan batasi tanggal di summary. Ini mencegah transaksi sore/maghrib tidak terbaca karena beda timezone.
-  const tr = await get("SELECT COUNT(*) c, COALESCE(SUM(total),0) omzet FROM transactions WHERE toko_id=? AND status<>'VOID'", [tid]);
+  const today = new Date().toISOString().slice(0,10);
+  const tr = await get("SELECT COUNT(*) c, COALESCE(SUM(total),0) omzet FROM transactions WHERE toko_id=? AND date(created_at)=date(?)", [tid,today]);
   const prod = (await get('SELECT COUNT(*)::int c FROM products WHERE toko_id=?', [tid])).c;
   const low = (await get('SELECT COUNT(*)::int c FROM products WHERE toko_id=? AND stok<=min_stok', [tid])).c;
   const kasir = (await get("SELECT COUNT(*)::int c FROM users WHERE toko_id=? AND role='kasir'", [tid])).c;
@@ -459,8 +442,7 @@ app.post('/api/admin/kasir/:id/reset-password', auth, ensureRole(['admin']), asy
 
 app.get('/api/admin/transactions', auth, ensureRole(['admin','kasir']), async (req,res)=>{
   const mine = req.user.role === 'kasir' ? ' AND kasir_id='+Number(req.user.id) : '';
-  // FIX AMAN: tampilkan transaksi terbaru berdasarkan created_at dan limit lebih besar.
-  res.json({ ok:true, data: await all(`SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.toko_id=? ${mine} ORDER BY tr.created_at DESC, tr.id DESC LIMIT 1000`, [req.user.toko_id]) });
+  res.json({ ok:true, data: await all(`SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.toko_id=? ${mine} ORDER BY tr.id DESC LIMIT 200`, [req.user.toko_id]) });
 });
 app.get('/api/admin/debts', auth, ensureRole(['admin']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM debts WHERE toko_id=? ORDER BY id DESC',[req.user.toko_id]) }));
 
@@ -468,8 +450,8 @@ app.get('/api/admin/chart', auth, ensureRole(['admin']), async (req,res)=>{
   const rows=[];
   for(let i=6;i>=0;i--){
     const d=new Date(); d.setDate(d.getDate()-i);
-    const key=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
-    const label=d.toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'short'});
+    const key=d.toISOString().slice(0,10);
+    const label=d.toLocaleDateString('id-ID',{day:'2-digit',month:'short'});
     const r=await get("SELECT COALESCE(SUM(total),0) omzet, COUNT(*) trx FROM transactions WHERE toko_id=? AND date(created_at)=date(?)",[req.user.toko_id,key]);
     rows.push({tanggal:key,label,omzet:r.omzet||0,transaksi:r.trx||0});
   }
@@ -507,7 +489,8 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
       return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
     }
   }
-  let invoice = await uniqueInvoice(req.user.toko_id, b.invoice);
+  let invoice=String(b.invoice || '').trim();
+  if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
   const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
   const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
   const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
@@ -523,20 +506,8 @@ app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
     }
   }
   const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
-  let info;
-  try {
-    info = await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId || null,poinDidapat,poinSisa]);
-  } catch (e) {
-    // FIX AMAN: jika invoice bentrok, jangan crash Railway. Buat invoice baru lalu ulang sekali.
-    if (String(e.message || '').includes('transactions_invoice_key') || String(e.message || '').includes('duplicate key')) {
-      invoice = await uniqueInvoice(req.user.toko_id, '');
-      info = await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId || null,poinDidapat,poinSisa]);
-    } else {
-      throw e;
-    }
-  }
+  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id,poin_didapat,poin_sisa) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,memberId,b.voucher||'',createdAt,offlineClientId || null,poinDidapat,poinSisa]);
   const trxId=info.lastInsertRowid;
   for (const it of items) {
     await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
@@ -832,7 +803,7 @@ app.post('/api/kasir/shift/close', auth, ensureRole(['kasir']), async (req,res)=
 });
 app.get('/api/admin/live-dashboard', auth, ensureRole(['admin']), async (req,res)=>{
   const tid=req.user.toko_id;
-  const today=todayJakartaDate();
+  const today=new Date().toISOString().slice(0,10);
   const sales=await get("SELECT COALESCE(SUM(total),0) omzet, COUNT(*) trx FROM transactions WHERE toko_id=? AND status<>'VOID' AND date(created_at)=date(?)",[tid,today]);
   const items=await get(`SELECT COALESCE(SUM(ti.qty),0) qty FROM transaction_items ti JOIN transactions tr ON tr.id=ti.transaction_id WHERE tr.toko_id=? AND tr.status<>'VOID' AND date(tr.created_at)=date(?)`,[tid,today]);
   const cash=await get("SELECT COALESCE(SUM(nominal),0) masuk FROM cashbooks WHERE toko_id=? AND tipe='MASUK' AND date(created_at)=date(?)",[tid,today])||{masuk:0};
