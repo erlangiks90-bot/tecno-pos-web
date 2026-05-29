@@ -313,11 +313,33 @@ function adjustLocalProductStock(items=[]){
   }catch(e){}
 }
 function pendingSyncCount(){return hybridQueue().filter(x=>x.status!=='synced').length;}
-function renderSyncReport(targetId='syncReportTable'){
+async function reconcileLocalSalesWithServer(){
+  // Tandai transaksi lokal sebagai SYNCED jika invoice sudah ada di server.
+  if(!API.user || !navigator.onLine) return;
+  try{
+    const r = await fetch(apiUrl('/api/admin/transactions'),{
+      headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''}
+    });
+    const j = await r.json().catch(()=>null);
+    if(!j || !j.ok || !Array.isArray(j.data)) return;
+    const serverInvoices = new Set(j.data.map(x=>String(x.invoice||x.offline_client_id||'')));
+    const rows = localSales();
+    let changed=false;
+    rows.forEach(x=>{
+      if(serverInvoices.has(String(x.invoice||'')) || serverInvoices.has(String(x.offline_client_id||''))){
+        if(x.status_sync!=='SYNCED'){x.status_sync='SYNCED';x.synced_at=new Date().toISOString();changed=true;}
+      }
+    });
+    if(changed) saveLocalSales(rows);
+  }catch(e){}
+}
+
+async function renderSyncReport(targetId='syncReportTable'){
+  await reconcileLocalSalesWithServer();
   const el=document.getElementById(targetId); if(!el) return;
   const q=hybridQueue().filter(x=>x.status!=='synced');
   const sales=localSales().slice().reverse().slice(0,30);
-  let html=`<div class="card"><h3>Status Sync</h3><p><b>${navigator.onLine?'ONLINE':'OFFLINE'}</b> • Pending upload: <b>${q.length}</b></p><button class="btn primary" onclick="syncOfflineQueue();setTimeout(()=>renderSyncReport('${targetId}'),800)">Sync Sekarang</button></div>`;
+  let html=`<div class="card"><h3>Status Sync</h3><p><b>${navigator.onLine?'ONLINE':'OFFLINE'}</b> • Pending upload: <b>${q.length}</b></p><button class="btn primary" onclick="syncOfflineQueue().then(()=>renderSyncReport('${targetId}'))">Sync Sekarang</button></div>`;
   html += '<h3>Transaksi Lokal Terakhir</h3>';
   html += '<div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Tanggal</th><th>Customer</th><th>Metode</th><th>Total</th><th>Status</th></tr></thead><tbody>';
   html += (sales.map(r=>`<tr><td>${r.invoice||'-'}</td><td>${r.created_at||'-'}</td><td>${r.customer||'-'}</td><td>${r.metode||'-'}</td><td>${rp(r.total||0)}</td><td><span class="badge ${r.status_sync==='SYNCED'?'ok':'warn'}">${r.status_sync||'PENDING'}</span></td></tr>`).join('') || '<tr><td colspan="6">Belum ada transaksi lokal</td></tr>');
