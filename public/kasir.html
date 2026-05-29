@@ -88,45 +88,6 @@ function calc(){let sub=CART.reduce((s,x)=>s+priceOf(x)*x.qty,0),auto=promoDisko
 diskon.oninput=calc;pajak.oninput=calc;biaya.oninput=calc;metode.onchange=calc;voucher.onchange=calc;memberSelect.onchange=renderCart;
 function clearCart(){CART=[];renderCart();customer.value='';diskon.value=0;pajak.value=0;biaya.value=0;bayar.value='';voucher.value='';localStorage.removeItem(CART_KEY)}
 async function holdCart(){if(!CART.length)return alert('Keranjang kosong');const payload={customer:customer.value||'Umum',items:CART,created_at:new Date().toISOString(),kode:'HOLD-'+Date.now().toString().slice(-6)};try{let j=await api('/api/kasir/hold',{method:'POST',body:{customer:payload.customer,items:payload.items}});toast('Keranjang disimpan: '+j.kode);}catch(e){let rows=localHolds();rows.unshift({...payload,id:'local-'+Date.now(),local:true,items_json:JSON.stringify(payload.items)});saveLocalHolds(rows);toast('Keranjang disimpan lokal/offline: '+payload.kode);}clearCart();loadHolds()}
-async function submitCheckoutServer(body){
-  const r = await fetch(apiUrl('/api/kasir/checkout'),{
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
-    body:JSON.stringify(body)
-  });
-  const text = await r.text();
-  let j = {};
-  try{ j = text ? JSON.parse(text) : {}; }catch(e){ j = {ok:false,message:'Server tidak merespon JSON'}; }
-  if(j.code==='TOKO_NONAKTIF'){
-    alert(j.message||'Toko nonaktif. Hubungi developer.');
-    localStorage.removeItem('tecno_user');
-    localStorage.removeItem('tecno_toko');
-    location.replace('/');
-    const err = new Error(j.message||'Toko nonaktif');
-    err.serverRejected = true;
-    throw err;
-  }
-  if(!r.ok || j.ok===false){
-    const err = new Error(j.message||'Transaksi ditolak server');
-    err.serverRejected = true;
-    throw err;
-  }
-  return j;
-}
-
-function simpanCheckoutOffline(body,items){
-  enqueueCheckout(body);
-  const j = makeOfflineReceipt(body);
-  window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
-  printReceipt(j.toko,j.transaction,j.items);
-  rememberLocalSale(j);
-  adjustLocalProductStock(items);
-  clearCart();
-  toast('OFFLINE: transaksi tersimpan lokal, pending sync ke server');
-  updateHybridBadge();
-  setTimeout(()=>{renderSyncReport();syncProductCache();},800);
-}
-
 async function checkout(){
   if(!CART.length)return alert('Keranjang kosong');
   if(!SHIFT_OPEN){alert('Buka Kas/Shift dulu sebelum transaksi');openShiftModal();return;}
@@ -147,30 +108,52 @@ async function checkout(){
   };
   ensureInvoice(body);
 
-  // Jika tidak ada sinyal: tetap boleh transaksi, tetapi status jelas PENDING SYNC.
-  if(!navigator.onLine){
-    simpanCheckoutOffline(body,items);
-    return;
+  // FIX ANTI BUG:
+  // ONLINE  = wajib simpan server dulu, baru cetak.
+  // OFFLINE = simpan queue pending, cetak struk offline, nanti sync.
+  if(navigator.onLine){
+    try{
+      const r = await fetch(apiUrl('/api/kasir/checkout'),{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
+        body:JSON.stringify(body)
+      });
+
+      const j = await r.json().catch(()=>({ok:false,message:'Server tidak merespon JSON'}));
+
+      if(!r.ok || !j.ok){
+        alert('Transaksi gagal masuk server: '+(j.message||'Server error'));
+        return;
+      }
+
+      // sukses server
+      printReceipt(j.toko,j.transaction,j.items);
+      rememberLocalSale({transaction:{...j.transaction,offline_client_id:body.offline_client_id},items:j.items});
+      markLocalSaleSynced(body.offline_client_id);
+      adjustLocalProductStock(items);
+      clearCart();
+      toast('Transaksi masuk server');
+      await loadTransactions();
+      renderSyncReport();
+      syncProductCache();
+      return;
+
+    }catch(err){
+      // Jika benar-benar putus koneksi / WebView gagal jaringan, baru masuk offline queue.
+      console.warn('Checkout online gagal, masuk mode offline:', err);
+    }
   }
 
-  try{
-    // Jika online: transaksi WAJIB masuk server dulu, baru cetak struk.
-    const j = await submitCheckoutServer(body);
-    printReceipt(j.toko,j.transaction,j.items);
-    rememberLocalSale(j);
-    adjustLocalProductStock(items);
-    clearCart();
-    toast('Transaksi masuk server dan riwayat admin');
-    await loadTransactions();
-    await syncProductCache();
-  }catch(err){
-    if(err.serverRejected){
-      alert('Transaksi gagal: '+err.message);
-      return;
-    }
-    // Server/Railway tidak bisa dijangkau: simpan offline, nanti sync otomatis.
-    simpanCheckoutOffline(body,items);
-  }
+  // OFFLINE / jaringan gagal
+  enqueueCheckout(body);
+  let j=makeOfflineReceipt(body);
+  window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
+  printReceipt(j.toko,j.transaction,j.items);
+  rememberLocalSale(j);
+  adjustLocalProductStock(items);
+  clearCart();
+  toast('OFFLINE: transaksi pending sync');
+  renderSyncReport();
 }
 async function loadTransactions(){let j=await api('/api/admin/transactions');let html=table(j.data,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status','status'],['Aksi',r=>`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);historyTable.innerHTML=html;loadHolds()}
 async function loadHolds(){let rows=[];try{let j=await api('/api/kasir/holds');rows=Array.isArray(j.data)?j.data:[]}catch(e){}rows=[...localHolds(),...rows];holdTable.innerHTML=table(rows,[['Kode','kode'],['Customer','customer'],['Tanggal','created_at'],['Aksi',r=>`<button class="btn" onclick='loadHold("${r.id}",${JSON.stringify(r.items_json||JSON.stringify(r.items||[]))},${r.local?'true':'false'})'>Buka</button> <button class="btn danger" onclick="delHold("${r.id}",${r.local?'true':'false'})">Hapus</button>`]])}
