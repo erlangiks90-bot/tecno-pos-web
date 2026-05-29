@@ -117,6 +117,15 @@ function safeNum(v){
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+// Anti-cache: penting agar Chrome/WebView/APK tidak memakai file kasir lama.
+app.use((req,res,next)=>{
+  if(req.path.endsWith('.html') || req.path.endsWith('.js') || req.path.startsWith('/api/')){
+    res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma','no-cache');
+    res.setHeader('Expires','0');
+  }
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const PACKAGE_LIMITS = {
@@ -474,51 +483,80 @@ app.post('/api/kasir/hold', auth, ensureRole(['kasir']), async (req,res)=>{
 app.get('/api/kasir/holds', auth, ensureRole(['kasir']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM holds WHERE toko_id=? AND kasir_id=? ORDER BY id DESC',[req.user.toko_id,req.user.id]) }));
 app.delete('/api/kasir/holds/:id', auth, ensureRole(['kasir']), async (req,res)=>{await run('DELETE FROM holds WHERE id=? AND toko_id=? AND kasir_id=?',[req.params.id,req.user.toko_id,req.user.id]);res.json({ok:true});});
 app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
-  // Jika kasir belum buka kas, sistem buka otomatis Rp0 agar transaksi tidak macet.
-  // Kasir tetap disarankan Buka Kas manual supaya laporan tutup kas lebih rapi.
-  if(!await currentShift(req.user.toko_id, req.user.id)){
-    try{ await run('INSERT INTO shift_sessions(toko_id,kasir_id,kasir_nama,uang_awal,catatan_buka) VALUES(?,?,?,?,?)',[req.user.toko_id,req.user.id,req.user.nama,0,'AUTO BUKA KAS']); }catch(e){}
-  }
-  const sec=await ensureSec(req.user.toko_id);
-  if(sec.mode_toko==='TUTUP') return res.status(403).json({ok:false,message:'Toko sedang mode tutup. Kasir tidak bisa transaksi.'});
-  const b=req.body; const items=b.items||[];
-  if (!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
-  const offlineClientId = String(b.offline_client_id || '').trim();
-  if (offlineClientId) {
-    const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=?', [offlineClientId]);
-    if (old) {
-      const toko=await tokoFor(req.user);
-      return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+  try{
+    if(!await currentShift(req.user.toko_id, req.user.id)){
+      try{ await run('INSERT INTO shift_sessions(toko_id,kasir_id,kasir_nama,uang_awal,catatan_buka) VALUES(?,?,?,?,?)',[req.user.toko_id,req.user.id,req.user.nama,0,'AUTO BUKA KAS']); }catch(e){}
     }
-  }
-  let invoice=String(b.invoice || '').trim();
-  if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
-  const subtotal=items.reduce((s,i)=>s+(Number(i.harga)*Number(i.qty)),0);
-  const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
-  const total=subtotal-diskon+pajak+biaya; const bayar=rupiah(b.bayar); const kembali=Math.max(0,bayar-total);
-  const status=b.metode==='UTANG'?'UTANG':'LUNAS';
-  const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
-  const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,b.metode||'TUNAI',status,Number(b.member_id||0),b.voucher||'',createdAt,offlineClientId || null]);
-  const trxId=info.lastInsertRowid;
-  for (const it of items) {
-    if(it.id){
-      const p = await get('SELECT id,nama,stok FROM products WHERE id=? AND toko_id=?', [it.id, req.user.toko_id]);
-      if(!p) return res.status(400).json({ok:false,message:'Produk bukan milik toko ini / sudah dihapus admin: '+(it.nama||it.id)});
+    const sec=await ensureSec(req.user.toko_id);
+    if(sec.mode_toko==='TUTUP') return res.status(403).json({ok:false,message:'Toko sedang mode tutup. Kasir tidak bisa transaksi.'});
+
+    const b=req.body || {};
+    const items=Array.isArray(b.items) ? b.items : [];
+    if(!items.length) return res.status(400).json({ok:false,message:'Keranjang kosong'});
+
+    const offlineClientId = String(b.offline_client_id || '').trim();
+    if(offlineClientId){
+      const old = await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.offline_client_id=? AND tr.toko_id=?', [offlineClientId, req.user.toko_id]);
+      if(old){
+        const toko=await tokoFor(req.user);
+        return res.json({ok:true, duplicate:true, transaction:old, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[old.id]), toko});
+      }
     }
-    await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
-    if (it.id) await run('UPDATE products SET stok=stok-? WHERE id=? AND toko_id=?',[Number(it.qty),it.id,req.user.toko_id]);
+
+    // Validasi semua produk dulu SEBELUM insert transaksi, agar tidak ada transaksi setengah jadi.
+    for(const it of items){
+      const qty=Number(it.qty||0);
+      const harga=Number(it.harga||0);
+      if(qty<=0) return res.status(400).json({ok:false,message:'Qty tidak valid: '+(it.nama||'produk')});
+      if(harga<0) return res.status(400).json({ok:false,message:'Harga tidak valid: '+(it.nama||'produk')});
+      if(it.id){
+        const p=await get('SELECT id,nama,stok FROM products WHERE id=? AND toko_id=?',[it.id, req.user.toko_id]);
+        if(!p) return res.status(400).json({ok:false,message:'Produk sudah dihapus / bukan milik toko ini: '+(it.nama||it.id)});
+        if(Number(p.stok||0)<qty) return res.status(400).json({ok:false,message:'Stok tidak cukup: '+p.nama+' sisa '+p.stok});
+      }
+    }
+
+    let invoice=String(b.invoice || '').trim();
+    if(!invoice || invoice.startsWith('OFF-')) invoice=code('TRX');
+    const subtotal=items.reduce((s,i)=>s+(Number(i.harga||0)*Number(i.qty||0)),0);
+    const diskon=rupiah(b.diskon), pajak=rupiah(b.pajak), biaya=rupiah(b.biaya);
+    const total=subtotal-diskon+pajak+biaya;
+    const bayar=rupiah(b.bayar);
+    const kembali=Math.max(0,bayar-total);
+    const metode=b.metode||'TUNAI';
+    const status=metode==='UTANG'?'UTANG':'LUNAS';
+    const createdAt=(b.client_time && /^\d{4}-\d{2}-\d{2} /.test(String(b.client_time))) ? String(b.client_time).slice(0,19) : nowJakartaSQL();
+
+    const info=await run('INSERT INTO transactions (toko_id,kasir_id,invoice,customer,subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,member_id,voucher,created_at,offline_client_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [req.user.toko_id,req.user.id,invoice,b.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode,status,Number(b.member_id||0),b.voucher||'',createdAt,offlineClientId || null]);
+    const trxId=info.lastInsertRowid;
+
+    for(const it of items){
+      await run('INSERT INTO transaction_items (transaction_id,product_id,nama,qty,harga,subtotal) VALUES (?,?,?,?,?,?)', [trxId,it.id||0,it.nama,Number(it.qty),Number(it.harga),Number(it.qty)*Number(it.harga)]);
+      if(it.id) await run('UPDATE products SET stok=stok-? WHERE id=? AND toko_id=?',[Number(it.qty),it.id,req.user.toko_id]);
+    }
+
+    const memberId=Number(b.member_id||0);
+    if(memberId>0){
+      const tambahPoin=Math.floor(Number(total||0)/10000);
+      await run('UPDATE members SET poin=poin+?, total_belanja=COALESCE(total_belanja,0)+? WHERE id=? AND toko_id=?',[tambahPoin,total,memberId,req.user.toko_id]);
+    }
+    if(status==='UTANG') await run('INSERT INTO debts (toko_id,transaction_id,nama_pelanggan,total,status) VALUES (?,?,?,?,?)',[req.user.toko_id,trxId,b.customer||'Pelanggan',total,'BELUM LUNAS']);
+
+    const trx=await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.id=? AND tr.toko_id=?',[trxId,req.user.toko_id]);
+    const toko=await tokoFor(req.user);
+    await log(req.user,'CHECKOUT',invoice);
+    return res.json({ok:true, transaction:trx, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[trxId]), toko});
+  }catch(e){
+    console.error('CHECKOUT ERROR:', e);
+    return res.status(500).json({ok:false,message:'Checkout gagal di server: '+e.message});
   }
-  const memberId = Number(b.member_id||0);
-  if(memberId>0){
-    const tambahPoin = Math.floor(Number(total||0)/10000); // default: Rp10.000 = 1 poin
-    await run('UPDATE members SET poin=poin+?, total_belanja=COALESCE(total_belanja,0)+? WHERE id=? AND toko_id=?',[tambahPoin,total,memberId,req.user.toko_id]);
-  }
-  if (status==='UTANG') await run('INSERT INTO debts (toko_id,transaction_id,nama_pelanggan,total,status) VALUES (?,?,?,?,?)',[req.user.toko_id,trxId,b.customer||'Pelanggan',total,'BELUM LUNAS']);
-  const trx=await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.id=?',[trxId]);
-  const toko=await tokoFor(req.user);
-  await log(req.user,'CHECKOUT',invoice);
-  res.json({ok:true, transaction:trx, items: await all('SELECT * FROM transaction_items WHERE transaction_id=?',[trxId]), toko});
+});
+
+app.get('/api/kasir/checkout-status/:offline_id', auth, ensureRole(['kasir']), async (req,res)=>{
+  const id=String(req.params.offline_id||'').trim();
+  const tr=await get('SELECT id,invoice,offline_client_id,total,created_at FROM transactions WHERE toko_id=? AND offline_client_id=?',[req.user.toko_id,id]);
+  res.json({ok:true, exists:!!tr, transaction:tr||null});
 });
 
 app.post('/api/change-password', auth, async (req,res)=>{

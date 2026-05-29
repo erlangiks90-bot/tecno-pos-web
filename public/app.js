@@ -72,16 +72,19 @@ async function api(url,opt={}){
     let j={};
     try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
     if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/');throw new Error(j.message)}
-    if(!r.ok||j.ok===false)throw new Error(j.message||'Error');
+    if(!r.ok||j.ok===false){ const e=new Error(j.message||'Error'); e.serverError=true; e.status=r.status; throw e; }
     return j;
   }catch(err){
-    if(url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST'){
+    const isCheckout = url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST';
+    const bolehOffline = isCheckout && !err.serverError && navigator.onLine===false;
+    if(bolehOffline){
       const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
       ensureInvoice(body);
       const q=hybridQueue();
-      q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
+      const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
+      if(!exists) q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
       saveHybridQueue(q);
-      toast('MODE OFFLINE: transaksi tersimpan, nanti auto-sync');
+      toast('OFFLINE: transaksi tersimpan lokal, belum masuk server');
       return makeOfflineReceipt(body);
     }
     throw err;
@@ -95,62 +98,30 @@ function enqueueCheckout(body){
   if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
   return body.offline_client_id;
 }
-async function syncOneCheckout(body){
-  ensureInvoice(body);
-  try{
-    const r = await fetch(apiUrl('/api/kasir/checkout'),{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
-      body:JSON.stringify(body)
-    });
-    const j = await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
-    if(!r.ok || !j.ok) throw new Error(j.message || 'Sync gagal');
-    markLocalSaleSynced(body.offline_client_id || body.invoice);
-    return j;
-  }catch(e){
-    enqueueCheckout(body);
-    throw e;
-  }
+function syncOneCheckout(body){
+  return fetch(apiUrl('/api/kasir/checkout'),{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
+    .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
+    .then(()=>syncOfflineQueue()).catch(()=>{});
 }
 
 async function syncOfflineQueue(){
   if(!API.user) return;
-  let q = hybridQueue();
+  let q=hybridQueue();
   if(!q.length){updateHybridBadge();return;}
   if(!navigator.onLine){updateHybridBadge();return;}
-
-  let changed=false, success=0, failed=0;
+  let changed=false;
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(apiUrl(item.url),{
-        method:item.method||'POST',
-        headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},
-        body:JSON.stringify(item.body)
-      });
+      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
-      if(r.ok && j.ok){
-        item.status='synced';
-        item.synced_at=new Date().toISOString();
-        markLocalSaleSynced(item.body?.offline_client_id || item.body?.invoice || j.transaction?.invoice);
-        changed=true;
-        success++;
-      }else{
-        item.last_error=j.message||('HTTP '+r.status);
-        failed++;
-      }
-    }catch(e){
-      item.last_error=e.message||'Koneksi gagal';
-      failed++;
-    }
+      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
+    }catch(e){}
   }
   const before=q.length;
   q=q.filter(x=>x.status!=='synced');
-  saveHybridQueue(q);
-  if(changed) toast(success+' transaksi pending berhasil masuk server');
-  if(failed && !success) toast('Sync belum berhasil, pending tetap tersimpan');
+  if(changed){saveHybridQueue(q);toast(before-q.length+' transaksi offline berhasil sync ke online')}
   updateHybridBadge();
-  try{await reconcileLocalSalesWithServer()}catch(e){}
 }
 function updateHybridBadge(){
   let el=document.getElementById('hybridStatus');
@@ -162,7 +133,15 @@ function updateHybridBadge(){
 window.addEventListener('online',()=>{updateHybridBadge();syncOfflineQueue()});
 window.addEventListener('offline',updateHybridBadge);
 setInterval(syncOfflineQueue,30000);
-document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); if('serviceWorker' in navigator){ navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{}); } });
+document.addEventListener('DOMContentLoaded',()=>{
+  updateHybridBadge();
+  syncOfflineQueue();
+  // Service worker dimatikan agar WebView/browser tidak memakai file lama dari cache.
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations?.().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
+    caches?.keys?.().then(keys=>keys.forEach(k=>caches.delete(k))).catch(()=>{});
+  }
+});
 
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
@@ -330,13 +309,8 @@ function rememberLocalSale(receipt){
 }
 function markLocalSaleSynced(offlineId){
   if(!offlineId) return;
-  const key=String(offlineId);
   const rows=localSales(); let changed=false;
-  rows.forEach(x=>{
-    if(String(x.offline_client_id||'')===key || String(x.invoice||'')===key){
-      x.status_sync='SYNCED'; x.synced_at=new Date().toISOString(); changed=true;
-    }
-  });
+  rows.forEach(x=>{if(x.offline_client_id===offlineId){x.status_sync='SYNCED';x.synced_at=new Date().toISOString();changed=true;}});
   if(changed) saveLocalSales(rows);
 }
 function adjustLocalProductStock(items=[]){

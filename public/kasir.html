@@ -89,81 +89,72 @@ diskon.oninput=calc;pajak.oninput=calc;biaya.oninput=calc;metode.onchange=calc;v
 function clearCart(){CART=[];renderCart();customer.value='';diskon.value=0;pajak.value=0;biaya.value=0;bayar.value='';voucher.value='';localStorage.removeItem(CART_KEY)}
 async function holdCart(){if(!CART.length)return alert('Keranjang kosong');const payload={customer:customer.value||'Umum',items:CART,created_at:new Date().toISOString(),kode:'HOLD-'+Date.now().toString().slice(-6)};try{let j=await api('/api/kasir/hold',{method:'POST',body:{customer:payload.customer,items:payload.items}});toast('Keranjang disimpan: '+j.kode);}catch(e){let rows=localHolds();rows.unshift({...payload,id:'local-'+Date.now(),local:true,items_json:JSON.stringify(payload.items)});saveLocalHolds(rows);toast('Keranjang disimpan lokal/offline: '+payload.kode);}clearCart();loadHolds()}
 async function checkout(){
-  if(!CART.length) return alert('Keranjang kosong');
+  if(!CART.length)return alert('Keranjang kosong');
+  if(!SHIFT_OPEN){alert('Buka Kas/Shift dulu sebelum transaksi');openShiftModal();return;}
 
-  // SERVER-FIRST STABIL:
-  // Online  : simpan ke server/Supabase dulu, baru cetak.
-  // Offline : masuk queue pending, struk tetap bisa dicetak dengan label OFFLINE.
-  // Catatan : server.js sudah auto buka shift Rp0 jika kasir belum buka kas, jadi jangan blok transaksi karena SHIFT_OPEN gagal dibaca.
-  let c = calc();
-  let items = CART.map(x => ({...x, harga: priceOf(x)}));
-  let body = {
+  let c=calc();
+  let items=CART.map(x=>({...x,harga:priceOf(x)}));
+  let body={
     items,
-    customer: customer.value || memberSelect.options[memberSelect.selectedIndex]?.text || 'Umum',
-    member_id: memberSelect.value,
-    diskon: c.d,
-    pajak: pajak.value,
-    biaya: biaya.value,
-    bayar: bayar.value,
-    metode: metode.value,
-    voucher: voucher.options[voucher.selectedIndex]?.text || '',
-    client_time: clientTimeJakartaSQL()
+    customer:customer.value||memberSelect.options[memberSelect.selectedIndex]?.text||'Umum',
+    member_id:memberSelect.value,
+    diskon:c.d,
+    pajak:pajak.value,
+    biaya:biaya.value,
+    bayar:bayar.value,
+    metode:metode.value,
+    voucher:voucher.options[voucher.selectedIndex]?.text||'',
+    client_time:clientTimeJakartaSQL()
   };
   ensureInvoice(body);
 
-  const simpanOffline = (alasan='Tidak ada koneksi') => {
-    enqueueCheckout(body);
-    let j = makeOfflineReceipt(body);
-    window.LAST_RECEIPT = {toko:j.toko, tr:j.transaction, items:j.items};
-    printReceipt(j.toko, j.transaction, j.items);
-    rememberLocalSale(j);
-    adjustLocalProductStock(items);
-    clearCart();
-    toast('OFFLINE/PENDING: transaksi belum masuk server');
-    alert('Transaksi disimpan PENDING. Belum masuk admin/server. Alasan: '+alasan+'\nNanti tekan Sync saat internet aktif.');
-    renderSyncReport();
-  };
+  // FIX ANTI BUG:
+  // ONLINE  = wajib simpan server dulu, baru cetak.
+  // OFFLINE = simpan queue pending, cetak struk offline, nanti sync.
+  if(navigator.onLine){
+    try{
+      const r = await fetch(apiUrl('/api/kasir/checkout'),{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
+        body:JSON.stringify(body)
+      });
 
-  if(!navigator.onLine){
-    simpanOffline('HP sedang offline');
-    return;
-  }
+      const j = await r.json().catch(()=>({ok:false,message:'Server tidak merespon JSON'}));
 
-  try{
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    const r = await fetch(apiUrl('/api/kasir/checkout'), {
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
-      body:JSON.stringify(body),
-      signal:controller.signal
-    });
-    clearTimeout(timer);
+      if(!r.ok || !j.ok){
+        alert('Transaksi gagal masuk server: '+(j.message||'Server error'));
+        return;
+      }
 
-    const j = await r.json().catch(() => ({ok:false, message:'Server tidak merespon JSON'}));
+      // sukses server
+      printReceipt(j.toko,j.transaction,j.items);
+      rememberLocalSale({transaction:{...j.transaction,offline_client_id:body.offline_client_id},items:j.items});
+      markLocalSaleSynced(body.offline_client_id);
+      adjustLocalProductStock(items);
+      clearCart();
+      toast('Transaksi masuk server');
+      await loadTransactions();
+      renderSyncReport();
+      syncProductCache();
+      return;
 
-    if(!r.ok || !j.ok){
-      // Error dari server berarti validasi gagal / user salah / produk sudah dihapus.
-      // Jangan dimasukkan offline, supaya tidak ada transaksi palsu.
-      alert('Transaksi GAGAL masuk server: '+(j.message || ('HTTP '+r.status)));
+    }catch(err){
+      console.warn('Checkout online gagal:', err);
+      alert('Transaksi gagal upload ke server. Tidak dicetak sebagai sukses. Cek internet / Railway lalu coba lagi.');
       return;
     }
-
-    // Berhasil benar-benar masuk server.
-    printReceipt(j.toko, j.transaction, j.items);
-    rememberLocalSale({transaction:{...j.transaction, offline_client_id: body.offline_client_id}, items:j.items});
-    markLocalSaleSynced(body.offline_client_id || j.transaction?.offline_client_id || j.transaction?.invoice);
-    adjustLocalProductStock(items);
-    clearCart();
-    toast('Transaksi masuk server/admin');
-    await loadTransactions();
-    await reconcileLocalSalesWithServer();
-    renderSyncReport();
-    syncProductCache();
-  }catch(err){
-    // Hanya error jaringan/timeout yang boleh offline.
-    simpanOffline(err.name==='AbortError' ? 'Timeout koneksi server' : (err.message || 'Koneksi gagal'));
   }
+
+  // OFFLINE asli: hanya berjalan kalau HP benar-benar offline.
+  enqueueCheckout(body);
+  let j=makeOfflineReceipt(body);
+  window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
+  printReceipt(j.toko,j.transaction,j.items);
+  rememberLocalSale(j);
+  adjustLocalProductStock(items);
+  clearCart();
+  toast('OFFLINE: transaksi belum masuk server, pending sync');
+  renderSyncReport();
 }
 async function loadTransactions(){let j=await api('/api/admin/transactions');let html=table(j.data,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status','status'],['Aksi',r=>`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);historyTable.innerHTML=html;loadHolds()}
 async function loadHolds(){let rows=[];try{let j=await api('/api/kasir/holds');rows=Array.isArray(j.data)?j.data:[]}catch(e){}rows=[...localHolds(),...rows];holdTable.innerHTML=table(rows,[['Kode','kode'],['Customer','customer'],['Tanggal','created_at'],['Aksi',r=>`<button class="btn" onclick='loadHold("${r.id}",${JSON.stringify(r.items_json||JSON.stringify(r.items||[]))},${r.local?'true':'false'})'>Buka</button> <button class="btn danger" onclick="delHold("${r.id}",${r.local?'true':'false'})">Hapus</button>`]])}

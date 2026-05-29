@@ -1,9 +1,0 @@
-node_modules/
-android/.gradle/
-android/app/build/
-build/
-dist/
-.env
-backups/
-*.db
-.DS_Store
