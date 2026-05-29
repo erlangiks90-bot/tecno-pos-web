@@ -108,52 +108,35 @@ async function checkout(){
   };
   ensureInvoice(body);
 
-  // FIX ANTI BUG:
-  // ONLINE  = wajib simpan server dulu, baru cetak.
-  // OFFLINE = simpan queue pending, cetak struk offline, nanti sync.
+  // FINAL ANTI BUG:
+  // ONLINE: server wajib simpan + diverifikasi, baru cetak.
+  // OFFLINE/gagal jaringan: masuk queue pending + struk offline.
   if(navigator.onLine){
     try{
-      const r = await fetch(apiUrl('/api/kasir/checkout'),{
-        method:'POST',
-        headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
-        body:JSON.stringify(body)
-      });
-
-      const j = await r.json().catch(()=>({ok:false,message:'Server tidak merespon JSON'}));
-
-      if(!r.ok || !j.ok){
-        alert('Transaksi gagal masuk server: '+(j.message||'Server error'));
-        return;
-      }
-
-      // sukses server
+      const j=await postCheckoutToServer(body);
       printReceipt(j.toko,j.transaction,j.items);
-      rememberLocalSale({transaction:{...j.transaction,offline_client_id:body.offline_client_id},items:j.items});
-      markLocalSaleSynced(body.offline_client_id);
+      rememberLocalSale({transaction:{...j.transaction,offline_client_id:body.offline_client_id},items:j.items}, body, 'SYNCED');
+      markLocalSaleSynced(body.offline_client_id,j.transaction);
       adjustLocalProductStock(items);
       clearCart();
-      toast('Transaksi masuk server');
+      toast('Transaksi masuk server dan riwayat admin');
       await loadTransactions();
-      renderSyncReport();
+      await renderSyncReport();
       syncProductCache();
       return;
-
     }catch(err){
-      // Jika benar-benar putus koneksi / WebView gagal jaringan, baru masuk offline queue.
-      console.warn('Checkout online gagal, masuk mode offline:', err);
+      alert('Transaksi belum masuk server. Disimpan PENDING untuk sync ulang.\nPenyebab: '+(err.message||err));
     }
   }
 
-  // OFFLINE / jaringan gagal
   enqueueCheckout(body);
   let j=makeOfflineReceipt(body);
-  window.LAST_RECEIPT={toko:j.toko,tr:j.transaction,items:j.items};
   printReceipt(j.toko,j.transaction,j.items);
-  rememberLocalSale(j);
+  rememberLocalSale(j, body, 'PENDING');
   adjustLocalProductStock(items);
   clearCart();
-  toast('OFFLINE: transaksi pending sync');
-  renderSyncReport();
+  toast('PENDING: transaksi belum masuk server. Tekan Sync saat internet stabil.');
+  await renderSyncReport();
 }
 async function loadTransactions(){let j=await api('/api/admin/transactions');let html=table(j.data,[['Invoice','invoice'],['Tanggal','created_at'],['Customer','customer'],['Metode','metode'],['Total',r=>rp(r.total)],['Status','status'],['Aksi',r=>`<button class="btn" onclick="reprint(${r.id})">Cetak</button> <button class="btn danger" onclick="requestVoid(${r.id})">Void</button>`]]);historyTable.innerHTML=html;loadHolds()}
 async function loadHolds(){let rows=[];try{let j=await api('/api/kasir/holds');rows=Array.isArray(j.data)?j.data:[]}catch(e){}rows=[...localHolds(),...rows];holdTable.innerHTML=table(rows,[['Kode','kode'],['Customer','customer'],['Tanggal','created_at'],['Aksi',r=>`<button class="btn" onclick='loadHold("${r.id}",${JSON.stringify(r.items_json||JSON.stringify(r.items||[]))},${r.local?'true':'false'})'>Buka</button> <button class="btn danger" onclick="delHold("${r.id}",${r.local?'true':'false'})">Hapus</button>`]])}

@@ -473,6 +473,16 @@ app.post('/api/kasir/hold', auth, ensureRole(['kasir']), async (req,res)=>{
 });
 app.get('/api/kasir/holds', auth, ensureRole(['kasir']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM holds WHERE toko_id=? AND kasir_id=? ORDER BY id DESC',[req.user.toko_id,req.user.id]) }));
 app.delete('/api/kasir/holds/:id', auth, ensureRole(['kasir']), async (req,res)=>{await run('DELETE FROM holds WHERE id=? AND toko_id=? AND kasir_id=?',[req.params.id,req.user.toko_id,req.user.id]);res.json({ok:true});});
+
+app.get('/api/kasir/checkout-status/:local_id', auth, ensureRole(['admin','kasir']), async (req,res)=>{
+  const localId=String(req.params.local_id||'').trim();
+  if(!localId) return res.status(400).json({ok:false,found:false,message:'local_id kosong'});
+  const tr=await get('SELECT tr.*, u.nama kasir FROM transactions tr LEFT JOIN users u ON u.id=tr.kasir_id WHERE tr.toko_id=? AND (tr.offline_client_id=? OR tr.invoice=?) ORDER BY tr.id DESC LIMIT 1',[req.user.toko_id,localId,localId]);
+  if(!tr) return res.json({ok:true,found:false});
+  const items=await all('SELECT * FROM transaction_items WHERE transaction_id=?',[tr.id]);
+  res.json({ok:true,found:true,transaction:tr,items});
+});
+
 app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
   // Jika kasir belum buka kas, sistem buka otomatis Rp0 agar transaksi tidak macet.
   // Kasir tetap disarankan Buka Kas manual supaya laporan tutup kas lebih rapi.
