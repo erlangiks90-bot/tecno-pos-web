@@ -95,30 +95,62 @@ function enqueueCheckout(body){
   if(!exists){q.push({url:'/api/kasir/checkout',method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});saveHybridQueue(q);}
   return body.offline_client_id;
 }
-function syncOneCheckout(body){
-  return fetch(apiUrl('/api/kasir/checkout'),{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body)})
-    .then(r=>r.json()).then(j=>{if(!j.ok)throw new Error(j.message||'Sync gagal'); return j;})
-    .then(()=>syncOfflineQueue()).catch(()=>{});
+async function syncOneCheckout(body){
+  ensureInvoice(body);
+  try{
+    const r = await fetch(apiUrl('/api/kasir/checkout'),{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
+      body:JSON.stringify(body)
+    });
+    const j = await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
+    if(!r.ok || !j.ok) throw new Error(j.message || 'Sync gagal');
+    markLocalSaleSynced(body.offline_client_id || body.invoice);
+    return j;
+  }catch(e){
+    enqueueCheckout(body);
+    throw e;
+  }
 }
 
 async function syncOfflineQueue(){
   if(!API.user) return;
-  let q=hybridQueue();
+  let q = hybridQueue();
   if(!q.length){updateHybridBadge();return;}
   if(!navigator.onLine){updateHybridBadge();return;}
-  let changed=false;
+
+  let changed=false, success=0, failed=0;
   for(const item of q){
     if(item.status==='synced') continue;
     try{
-      const r=await fetch(apiUrl(item.url),{method:item.method||'POST',headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},body:JSON.stringify(item.body)});
+      const r=await fetch(apiUrl(item.url),{
+        method:item.method||'POST',
+        headers:{'Content-Type':'application/json','x-user-id':item.user_id||API.user.id},
+        body:JSON.stringify(item.body)
+      });
       const j=await r.json().catch(()=>({ok:false,message:'Server tidak JSON'}));
-      if(r.ok && j.ok){item.status='synced';item.synced_at=new Date().toISOString();try{markLocalSaleSynced(item.body?.offline_client_id)}catch(e){} changed=true;}
-    }catch(e){}
+      if(r.ok && j.ok){
+        item.status='synced';
+        item.synced_at=new Date().toISOString();
+        markLocalSaleSynced(item.body?.offline_client_id || item.body?.invoice || j.transaction?.invoice);
+        changed=true;
+        success++;
+      }else{
+        item.last_error=j.message||('HTTP '+r.status);
+        failed++;
+      }
+    }catch(e){
+      item.last_error=e.message||'Koneksi gagal';
+      failed++;
+    }
   }
   const before=q.length;
   q=q.filter(x=>x.status!=='synced');
-  if(changed){saveHybridQueue(q);toast(before-q.length+' transaksi offline berhasil sync ke online')}
+  saveHybridQueue(q);
+  if(changed) toast(success+' transaksi pending berhasil masuk server');
+  if(failed && !success) toast('Sync belum berhasil, pending tetap tersimpan');
   updateHybridBadge();
+  try{await reconcileLocalSalesWithServer()}catch(e){}
 }
 function updateHybridBadge(){
   let el=document.getElementById('hybridStatus');
@@ -130,7 +162,7 @@ function updateHybridBadge(){
 window.addEventListener('online',()=>{updateHybridBadge();syncOfflineQueue()});
 window.addEventListener('offline',updateHybridBadge);
 setInterval(syncOfflineQueue,30000);
-document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});});
+document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); if('serviceWorker' in navigator){ navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{}); } });
 
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
@@ -298,8 +330,13 @@ function rememberLocalSale(receipt){
 }
 function markLocalSaleSynced(offlineId){
   if(!offlineId) return;
+  const key=String(offlineId);
   const rows=localSales(); let changed=false;
-  rows.forEach(x=>{if(x.offline_client_id===offlineId){x.status_sync='SYNCED';x.synced_at=new Date().toISOString();changed=true;}});
+  rows.forEach(x=>{
+    if(String(x.offline_client_id||'')===key || String(x.invoice||'')===key){
+      x.status_sync='SYNCED'; x.synced_at=new Date().toISOString(); changed=true;
+    }
+  });
   if(changed) saveLocalSales(rows);
 }
 function adjustLocalProductStock(items=[]){
@@ -567,164 +604,3 @@ function openChangePassword(){
   changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.replace('/')},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}
-
-
-/* =========================================================
-   TECNO POS FINAL FIX 2026-05-30
-   Anti pending palsu: localSales, queue, server verify dibuat satu jalur.
-   ========================================================= */
-const TECNO_CHECKOUT_FIX_VERSION='2026-05-30-final-anti-pending-palsu';
-
-function checkoutLocalIdOf(obj){
-  return String(obj?.offline_client_id || obj?.invoice || obj?.body?.offline_client_id || obj?.body?.invoice || '').trim();
-}
-function setLocalSaleStatus(localId, status, extra={}){
-  if(!localId) return;
-  const rows=localSales();
-  let changed=false;
-  rows.forEach(x=>{
-    if(String(x.offline_client_id||x.invoice||'')===String(localId)){
-      x.status_sync=status;
-      Object.assign(x, extra||{});
-      changed=true;
-    }
-  });
-  if(changed) saveLocalSales(rows);
-}
-function rememberLocalSale(receipt, syncBody=null, status='PENDING'){
-  try{
-    const rows=localSales();
-    const tr=receipt.transaction||receipt.tr||{};
-    const localId=String(tr.offline_client_id||tr.invoice||syncBody?.offline_client_id||syncBody?.invoice||'');
-    const exists=rows.find(x=>String(x.offline_client_id||x.invoice||'')===localId);
-    const row={
-      invoice:tr.invoice||localId,
-      offline_client_id:localId,
-      created_at:tr.created_at||new Date().toISOString(),
-      customer:tr.customer||syncBody?.customer||'Umum',
-      metode:tr.metode||syncBody?.metode||'TUNAI',
-      total:tr.total||0,
-      status_sync:status,
-      sync_body:syncBody||exists?.sync_body||null,
-      items:receipt.items||[]
-    };
-    if(exists) Object.assign(exists,row);
-    else rows.push(row);
-    saveLocalSales(rows);
-  }catch(e){}
-}
-function markLocalSaleSynced(offlineId, serverTr=null){
-  if(!offlineId) return;
-  setLocalSaleStatus(offlineId,'SYNCED',{synced_at:new Date().toISOString(), server_id:serverTr?.id||undefined});
-}
-function queueHasLocalId(q, localId){
-  return (q||[]).some(x=>String(x.body?.offline_client_id||x.body?.invoice||'')===String(localId) && x.status!=='synced');
-}
-function repairQueueFromLocalSales(){
-  try{
-    const q=hybridQueue();
-    let changed=false;
-    localSales().forEach(s=>{
-      const localId=String(s.offline_client_id||s.invoice||'');
-      if(s.status_sync==='PENDING' && s.sync_body && !queueHasLocalId(q,localId)){
-        q.push({url:'/api/kasir/checkout',method:'POST',body:s.sync_body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending',repaired:true});
-        changed=true;
-      }
-    });
-    if(changed) saveHybridQueue(q);
-  }catch(e){}
-}
-async function verifyCheckoutOnServer(localId){
-  if(!localId || !API.user) return null;
-  try{
-    const r=await fetch(apiUrl('/api/kasir/checkout-status/'+encodeURIComponent(localId)),{
-      method:'GET',
-      cache:'no-store',
-      headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''}
-    });
-    const j=await r.json().catch(()=>null);
-    if(r.ok && j && j.ok && j.found) return j.transaction;
-  }catch(e){}
-  return null;
-}
-async function postCheckoutToServer(body){
-  ensureInvoice(body);
-  const r=await fetch(apiUrl('/api/kasir/checkout'),{
-    method:'POST',
-    cache:'no-store',
-    headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},
-    body:JSON.stringify(body)
-  });
-  const text=await r.text();
-  let j={};
-  try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:'Server tidak merespon JSON'};}
-  if(!r.ok || !j.ok) throw new Error(j.message||('HTTP '+r.status));
-  const verified=await verifyCheckoutOnServer(body.offline_client_id||j.transaction?.offline_client_id||j.transaction?.invoice||body.invoice);
-  if(!verified) throw new Error('Server belum mengonfirmasi transaksi. Coba Sync ulang.');
-  return j;
-}
-async function syncOfflineQueue(){
-  if(!API.user) return;
-  repairQueueFromLocalSales();
-  let q=hybridQueue();
-  if(!q.length){updateHybridBadge();return;}
-  if(!navigator.onLine){updateHybridBadge();return;}
-
-  let synced=0;
-  for(const item of q){
-    if(item.status==='synced') continue;
-    const localId=checkoutLocalIdOf(item.body);
-    try{
-      const old=await verifyCheckoutOnServer(localId);
-      if(old){
-        item.status='synced';
-        item.synced_at=new Date().toISOString();
-        markLocalSaleSynced(localId,old);
-        synced++;
-        continue;
-      }
-      const j=await postCheckoutToServer(item.body);
-      item.status='synced';
-      item.synced_at=new Date().toISOString();
-      markLocalSaleSynced(localId,j.transaction);
-      synced++;
-    }catch(e){
-      item.status='pending';
-      item.last_error=e.message||String(e);
-      setLocalSaleStatus(localId,'PENDING',{last_error:item.last_error});
-    }
-  }
-  q=q.filter(x=>x.status!=='synced');
-  saveHybridQueue(q);
-  if(synced) toast(synced+' transaksi berhasil masuk server');
-  updateHybridBadge();
-}
-async function reconcileLocalSalesWithServer(){
-  if(!API.user || !navigator.onLine) return;
-  repairQueueFromLocalSales();
-  const rows=localSales();
-  for(const x of rows){
-    const localId=String(x.offline_client_id||x.invoice||'');
-    if(!localId || x.status_sync==='SYNCED') continue;
-    const tr=await verifyCheckoutOnServer(localId);
-    if(tr) markLocalSaleSynced(localId,tr);
-  }
-}
-async function renderSyncReport(targetId='syncReportTable'){
-  await reconcileLocalSalesWithServer();
-  const el=document.getElementById(targetId); if(!el) return;
-  const q=hybridQueue().filter(x=>x.status!=='synced');
-  const sales=localSales().slice().reverse().slice(0,30);
-  let html=`<div class="card"><h3>Status Sync</h3><p><b>${navigator.onLine?'ONLINE':'OFFLINE'}</b> • Pending upload: <b>${q.length}</b></p><button class="btn primary" onclick="syncOfflineQueue().then(()=>renderSyncReport('${targetId}'))">Sync Sekarang</button><p class="side-sub">Versi sync: ${TECNO_CHECKOUT_FIX_VERSION}</p></div>`;
-  html += '<h3>Transaksi Lokal Terakhir</h3>';
-  html += '<div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Tanggal</th><th>Customer</th><th>Metode</th><th>Total</th><th>Status</th><th>Keterangan</th></tr></thead><tbody>';
-  html += (sales.map(r=>`<tr><td>${r.invoice||'-'}</td><td>${r.created_at||'-'}</td><td>${r.customer||'-'}</td><td>${r.metode||'-'}</td><td>${rp(r.total||0)}</td><td><span class="badge ${r.status_sync==='SYNCED'?'ok':'warn'}">${r.status_sync||'PENDING'}</span></td><td>${r.last_error||''}</td></tr>`).join('') || '<tr><td colspan="7">Belum ada transaksi lokal</td></tr>');
-  html += '</tbody></table></div>';
-  el.innerHTML=html;
-}
-if('serviceWorker' in navigator){
-  try{
-    navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.unregister()));
-    caches?.keys?.().then(keys=>keys.forEach(k=>caches.delete(k)));
-  }catch(e){}
-}
