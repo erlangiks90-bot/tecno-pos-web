@@ -72,19 +72,16 @@ async function api(url,opt={}){
     let j={};
     try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:r.ok?'Response error':'Server tidak merespon JSON'};}
     if(j.code==='TOKO_NONAKTIF'){alert(j.message||'Toko nonaktif. Hubungi developer.');localStorage.removeItem('tecno_user');localStorage.removeItem('tecno_toko');location.replace('/');throw new Error(j.message)}
-    if(!r.ok||j.ok===false){ const e=new Error(j.message||'Error'); e.serverError=true; e.status=r.status; throw e; }
+    if(!r.ok||j.ok===false)throw new Error(j.message||'Error');
     return j;
   }catch(err){
-    const isCheckout = url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST';
-    const bolehOffline = isCheckout && !err.serverError && navigator.onLine===false;
-    if(bolehOffline){
+    if(url==='/api/kasir/checkout' && (opt.method||'').toUpperCase()==='POST'){
       const body=typeof originalBody==='string'?JSON.parse(originalBody||'{}'):(originalBody||{});
       ensureInvoice(body);
       const q=hybridQueue();
-      const exists=q.some(x=>x.body && x.body.offline_client_id===body.offline_client_id);
-      if(!exists) q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
+      q.push({url,method:'POST',body,user_id:API.user?.id||'',created_at:new Date().toISOString(),status:'pending'});
       saveHybridQueue(q);
-      toast('OFFLINE: transaksi tersimpan lokal, belum masuk server');
+      toast('MODE OFFLINE: transaksi tersimpan, nanti auto-sync');
       return makeOfflineReceipt(body);
     }
     throw err;
@@ -133,15 +130,7 @@ function updateHybridBadge(){
 window.addEventListener('online',()=>{updateHybridBadge();syncOfflineQueue()});
 window.addEventListener('offline',updateHybridBadge);
 setInterval(syncOfflineQueue,30000);
-document.addEventListener('DOMContentLoaded',()=>{
-  updateHybridBadge();
-  syncOfflineQueue();
-  // Service worker dimatikan agar WebView/browser tidak memakai file lama dari cache.
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.getRegistrations?.().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
-    caches?.keys?.().then(keys=>keys.forEach(k=>caches.delete(k))).catch(()=>{});
-  }
-});
+document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); /* serviceWorker dimatikan agar file lama tidak nyangkut */ });
 
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
