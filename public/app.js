@@ -130,7 +130,7 @@ function updateHybridBadge(){
 window.addEventListener('online',()=>{updateHybridBadge();syncOfflineQueue()});
 window.addEventListener('offline',updateHybridBadge);
 setInterval(syncOfflineQueue,30000);
-document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); /* serviceWorker dimatikan agar file lama tidak nyangkut */ });
+document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge();syncOfflineQueue(); if('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});});
 
 function toast(t){let d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2600)}
 
@@ -465,13 +465,14 @@ function setupMobileBackGuard(){
   });
 }
 function table(rows, cols){return `<div class="table-wrap"><table class="table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>{let v=typeof c[1]==='function'?c[1](r):(r[c[1]]??''); if(typeof c[1]==='string' && /(_at|tanggal|created_at)$/i.test(c[1]) && v) v=formatDateID(v); return `<td>${v}</td>`}).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}">Data kosong</td></tr>`}</tbody></table></div>`}
-function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';return `<div class="receipt print-area"><div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No Transaksi: ${tr.invoice||tr.offline_client_id||'-'}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
+function receiptHTML(toko,tr,items){const freeBrand=(toko.paket||'GRATIS')==='GRATIS'?'<hr><div class="center-text">Powered by Erlang Tecno</div>':'';const offlineMark=(String(tr.status||'').includes('OFFLINE')||String(tr.invoice||'').startsWith('OFFLINE-'))?'<div class="notice warn center-text"><b>OFFLINE - BELUM MASUK SERVER</b></div>':'';return `<div class="receipt print-area">${offlineMark}<div class="center-text"><div class="big">${toko.nama_toko||'NAMA TOKO'}</div><div>${toko.alamat||''}</div><div>${toko.no_hp||''}</div></div><hr><div>No Transaksi: ${tr.invoice||tr.offline_client_id||'-'}</div><div>Kasir: ${tr.kasir||API.user.nama}</div><div>Tgl: ${formatDateID(tr.created_at)}</div><hr>${items.map(i=>`<div>${i.nama}</div><div class="rrow"><span>${i.qty} x ${rp(i.harga)}</span><span>${rp(i.subtotal)}</span></div>`).join('')}<hr><div class="rrow"><span>Subtotal</span><span>${rp(tr.subtotal)}</span></div><div class="rrow"><span>Diskon</span><span>${rp(tr.diskon)}</span></div><div class="rrow"><span>Pajak</span><span>${rp(tr.pajak)}</span></div><div class="rrow big"><span>TOTAL</span><span>${rp(tr.total)}</span></div><div class="rrow"><span>${tr.metode}</span><span>${rp(tr.bayar)}</span></div><div class="rrow"><span>Kembali</span><span>${rp(tr.kembali)}</span></div><hr><div class="center-text">${toko.footer_struk||'Terima kasih'}</div>${freeBrand}</div>`}
 function escposText(toko,tr,items){
   const line='--------------------------------';
   const cut=(txt,w=32)=>String(txt||'').slice(0,w);
   const money=n=>Number(n||0).toLocaleString('id-ID');
   const row=(l,r)=>cut(l,20).padEnd(20,' ')+cut(r,12).padStart(12,' ');
   let out=[];
+  if(String(tr.status||'').includes('OFFLINE')||String(tr.invoice||'').startsWith('OFFLINE-')){out.push('*** OFFLINE ***');out.push('BELUM MASUK SERVER');out.push('');}
   out.push((toko.nama_toko||'NAMA TOKO').toUpperCase());
   if(toko.alamat)out.push(cut(toko.alamat));
   if(toko.no_hp)out.push(cut(toko.no_hp));
@@ -567,3 +568,157 @@ function openChangePassword(){
   changePassForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/change-password',{method:'POST',body:Object.fromEntries(new FormData(changePassForm).entries())});closeModal();toast('Password berhasil diubah. Silakan login ulang.');setTimeout(()=>{localStorage.clear();sessionStorage.clear();location.replace('/')},900)}catch(err){alert(err.message)}}
 }
 function togglePassword(id){const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password'}
+
+
+/* =========================================================
+   TECNO POS PRO OFFLINE ENGINE v1 - IndexedDB + Server First
+   Tujuan: transaksi online WAJIB masuk server dulu baru cetak.
+   Offline: simpan IndexedDB, status PENDING, sync ulang saat online.
+   ========================================================= */
+(function(){
+  const DB_NAME='tecno_pos_pro_offline_v1';
+  const DB_VER=1;
+  const TX_STORE='pending_transactions';
+
+  function openDb(){
+    return new Promise((resolve,reject)=>{
+      const req=indexedDB.open(DB_NAME,DB_VER);
+      req.onupgradeneeded=()=>{
+        const db=req.result;
+        if(!db.objectStoreNames.contains(TX_STORE)){
+          const st=db.createObjectStore(TX_STORE,{keyPath:'client_tx_id'});
+          st.createIndex('status','status',{unique:false});
+          st.createIndex('created_at','created_at',{unique:false});
+        }
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error||new Error('IndexedDB gagal dibuka'));
+    });
+  }
+  function txStore(mode='readonly'){
+    return openDb().then(db=>db.transaction(TX_STORE,mode).objectStore(TX_STORE));
+  }
+  function idbReq(req){
+    return new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('IndexedDB request gagal'));});
+  }
+  window.makeClientTxId=function(){
+    const toko=API?.user?.toko_id || API?.toko?.id || 'T';
+    return 'CTX-'+toko+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
+  }
+  window.posOfflineCount=async function(){
+    try{
+      const st=await txStore('readonly');
+      const all=await idbReq(st.getAll());
+      const legacy=(typeof hybridQueue==='function'?hybridQueue():[]).filter(x=>x.status!=='synced').length;
+      return all.filter(x=>x.status!=='SYNCED').length + legacy;
+    }catch(e){return 0}
+  }
+  window.posOfflineRows=async function(){
+    try{const st=await txStore('readonly');return await idbReq(st.getAll()) || [];}catch(e){return []}
+  }
+  window.posSaveOfflineTransaction=async function(body, receipt){
+    if(!body.client_tx_id) body.client_tx_id=makeClientTxId();
+    if(!body.offline_client_id) body.offline_client_id=body.client_tx_id;
+    const row={
+      client_tx_id:body.client_tx_id,
+      offline_client_id:body.offline_client_id,
+      toko_id:API.user?.toko_id||0,
+      kasir_id:API.user?.id||0,
+      body:JSON.parse(JSON.stringify(body)),
+      receipt:receipt||null,
+      status:'PENDING',
+      retry_count:0,
+      last_error:'',
+      created_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    };
+    const st=await txStore('readwrite');
+    await idbReq(st.put(row));
+    return row;
+  }
+  window.posMarkOffline=function(clientId, patch){
+    return (async()=>{
+      const st=await txStore('readwrite');
+      const row=await idbReq(st.get(clientId));
+      if(row){Object.assign(row,patch||{}, {updated_at:new Date().toISOString()}); await idbReq(st.put(row));}
+    })().catch(()=>{});
+  }
+  window.posServerCheckout=async function(body){
+    if(!body.client_tx_id) body.client_tx_id=makeClientTxId();
+    if(!body.offline_client_id) body.offline_client_id=body.client_tx_id;
+    const url=apiUrl('/api/kasir/checkout');
+    let r, text, j;
+    try{
+      r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-user-id':API.user?.id||''},body:JSON.stringify(body),cache:'no-store'});
+    }catch(err){
+      err.isNetwork=true;
+      throw err;
+    }
+    text=await r.text();
+    try{j=text?JSON.parse(text):{};}catch(e){j={ok:false,message:'Server tidak merespon JSON: '+text.slice(0,80)};}
+    if(!r.ok || !j.ok || !j.transaction || !j.transaction.id){
+      const err=new Error(j.message||('Checkout server gagal HTTP '+r.status));
+      err.isServer=true;
+      err.response=j;
+      throw err;
+    }
+    return j;
+  }
+  window.makeOfflineReceiptPro=function(body){
+    const subtotal=(body.items||[]).reduce((s,i)=>s+Number(i.harga||0)*Number(i.qty||0),0);
+    const diskon=Number(body.diskon||0), pajak=Number(body.pajak||0), biaya=Number(body.biaya||0);
+    const total=subtotal-diskon+pajak+biaya, bayar=Number(body.bayar||0), kembali=Math.max(0,bayar-total);
+    const id=body.client_tx_id||body.offline_client_id||makeClientTxId();
+    const tr={id:-Date.now(),invoice:'OFFLINE-'+id.slice(-10),offline_client_id:id,customer:body.customer||'Umum',subtotal,diskon,pajak,biaya,total,bayar,kembali,metode:body.metode||'TUNAI',status:'OFFLINE_PENDING',created_at:body.client_time||new Date().toISOString(),kasir:API.user?.nama||'Kasir'};
+    const items=(body.items||[]).map((x,i)=>({id:i+1,transaction_id:tr.id,product_id:x.id||0,nama:x.nama,qty:x.qty,harga:x.harga,subtotal:Number(x.qty)*Number(x.harga)}));
+    return {ok:true,offline:true,transaction:tr,items,toko:API.toko||{nama_toko:'TECNO POS'}};
+  }
+
+  window.syncOfflineQueue=async function(){
+    if(!API.user || !navigator.onLine){updateHybridBadge();return;}
+    const rows=await posOfflineRows();
+    let okCount=0;
+    for(const row of rows.filter(x=>x.status!=='SYNCED')){
+      try{
+        const body=row.body||{};
+        body.client_tx_id=row.client_tx_id;
+        body.offline_client_id=row.offline_client_id||row.client_tx_id;
+        const j=await posServerCheckout(body);
+        await posMarkOffline(row.client_tx_id,{status:'SYNCED',server_invoice:j.transaction.invoice,server_id:j.transaction.id,last_error:'',synced_at:new Date().toISOString()});
+        try{markLocalSaleSynced(body.offline_client_id)}catch(e){}
+        okCount++;
+      }catch(err){
+        await posMarkOffline(row.client_tx_id,{status:'FAILED',retry_count:Number(row.retry_count||0)+1,last_error:String(err.message||err).slice(0,200)});
+      }
+    }
+    if(okCount) toast(okCount+' transaksi offline berhasil masuk server');
+    updateHybridBadge();
+  }
+
+  window.updateHybridBadge=function(){
+    let el=document.getElementById('hybridStatus');
+    if(!el){el=document.createElement('div');el.id='hybridStatus';el.className='hybrid-status';document.body.appendChild(el)}
+    posOfflineCount().then(n=>{
+      el.textContent=(navigator.onLine?'ONLINE':'OFFLINE')+(n?` • pending sync ${n}`:' • tersinkron');
+      el.classList.toggle('offline',!navigator.onLine||n>0);
+    }).catch(()=>{el.textContent=navigator.onLine?'ONLINE':'OFFLINE'});
+  }
+
+  window.renderSyncReport=async function(targetId='syncReportTable'){
+    const el=document.getElementById(targetId); if(!el) return;
+    const rows=await posOfflineRows();
+    const pending=rows.filter(x=>x.status!=='SYNCED');
+    const sales=(typeof localSales==='function'?localSales():[]).slice().reverse().slice(0,30);
+    let html=`<div class="card"><h3>Status Sync</h3><p><b>${navigator.onLine?'ONLINE':'OFFLINE'}</b> • Pending upload: <b>${pending.length}</b></p><button class="btn primary" onclick="syncOfflineQueue().then(()=>renderSyncReport('${targetId}'))">Sync Sekarang</button></div>`;
+    html += '<h3>Antrian Offline</h3><div class="table-wrap"><table><thead><tr><th>Client ID</th><th>Status</th><th>Retry</th><th>Error</th><th>Dibuat</th></tr></thead><tbody>';
+    html += (rows.slice().reverse().slice(0,50).map(r=>`<tr><td>${r.client_tx_id||'-'}</td><td><span class="badge ${r.status==='SYNCED'?'ok':r.status==='FAILED'?'danger':'warn'}">${r.status||'PENDING'}</span></td><td>${r.retry_count||0}</td><td>${r.last_error||''}</td><td>${formatDateID(r.created_at)}</td></tr>`).join('') || '<tr><td colspan="5">Tidak ada antrian offline</td></tr>');
+    html += '</tbody></table></div><h3>Transaksi Lokal Terakhir</h3>';
+    html += '<div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Tanggal</th><th>Customer</th><th>Metode</th><th>Total</th><th>Status</th></tr></thead><tbody>';
+    html += (sales.map(r=>`<tr><td>${r.invoice||'-'}</td><td>${formatDateID(r.created_at)}</td><td>${r.customer||'-'}</td><td>${r.metode||'-'}</td><td>${rp(r.total||0)}</td><td><span class="badge ${r.status_sync==='SYNCED'?'ok':'warn'}">${r.status_sync||'PENDING'}</span></td></tr>`).join('') || '<tr><td colspan="6">Belum ada transaksi lokal</td></tr>');
+    html += '</tbody></table></div>';
+    el.innerHTML=html;
+  }
+
+  window.addEventListener('online',()=>syncOfflineQueue());
+  document.addEventListener('DOMContentLoaded',()=>{updateHybridBadge(); setTimeout(syncOfflineQueue,1000);});
+})();

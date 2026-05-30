@@ -115,17 +115,16 @@ function safeNum(v){
 }
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Anti cache: supaya Chrome/WebView/APK tidak memakai file JS/HTML lama.
 app.use((req,res,next)=>{
-  res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma','no-cache');
-  res.setHeader('Expires','0');
+  if(req.path.endsWith('.html') || req.path.endsWith('.js') || req.path==='/'){
+    res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma','no-cache');
+    res.setHeader('Expires','0');
+  }
   next();
 });
-
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const PACKAGE_LIMITS = {
@@ -483,6 +482,7 @@ app.post('/api/kasir/hold', auth, ensureRole(['kasir']), async (req,res)=>{
 app.get('/api/kasir/holds', auth, ensureRole(['kasir']), async (req,res)=> res.json({ ok:true, data: await all('SELECT * FROM holds WHERE toko_id=? AND kasir_id=? ORDER BY id DESC',[req.user.toko_id,req.user.id]) }));
 app.delete('/api/kasir/holds/:id', auth, ensureRole(['kasir']), async (req,res)=>{await run('DELETE FROM holds WHERE id=? AND toko_id=? AND kasir_id=?',[req.params.id,req.user.toko_id,req.user.id]);res.json({ok:true});});
 app.post('/api/kasir/checkout', auth, ensureRole(['kasir']), async (req,res)=>{
+  console.log('CHECKOUT_HTTP_MASUK', {user:req.user?.id, toko:req.user?.toko_id, items:(req.body.items||[]).length, client_tx_id:req.body.client_tx_id||req.body.offline_client_id||''});
   // Jika kasir belum buka kas, sistem buka otomatis Rp0 agar transaksi tidak macet.
   // Kasir tetap disarankan Buka Kas manual supaya laporan tutup kas lebih rapi.
   if(!await currentShift(req.user.toko_id, req.user.id)){

@@ -1,3 +1,3 @@
-// TECNO POS: service worker dinonaktifkan untuk mencegah cache file lama.
-self.addEventListener('install', event => self.skipWaiting());
-self.addEventListener('activate', event => { event.waitUntil(self.registration.unregister()); });
+// TECNO POS: service worker dimatikan agar file kasir tidak cache lama.
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
